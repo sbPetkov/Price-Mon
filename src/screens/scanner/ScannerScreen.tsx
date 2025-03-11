@@ -1,5 +1,15 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TouchableOpacity, 
+  Alert,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,83 +17,100 @@ import { supabase } from '../../config/supabase';
 
 type ScannerScreenProps = NativeStackScreenProps<any, 'ScannerScreen'>;
 
-const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
+const ScannerScreen = ({ navigation }: ScannerScreenProps) => {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [loading, setLoading] = useState(false);
   const [flashMode, setFlashMode] = useState('off');
   const [facing, setFacing] = useState('back');
+  const [modalVisible, setModalVisible] = useState(false);
+  const [manualBarcode, setManualBarcode] = useState('');
 
   const toggleFlash = () => {
     setFlashMode(flashMode === 'off' ? 'torch' : 'off');
   };
 
-  if (!permission) {
-    // Camera permissions are still loading
-    return (
-      <View style={styles.container}>
-        <Text>Requesting camera permission...</Text>
-      </View>
-    );
-  }
+  const handleBarCodeScanned = async ({ data }: BarcodeScanningResult) => {
+    setScanned(true);
+    setLoading(true);
 
-  if (!permission.granted) {
+    try {
+      // Check if product exists
+      const { data: products, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('barcode', data)
+        .limit(1);
+
+      if (error) throw error;
+
+      if (products && products.length > 0) {
+        // Product exists, navigate to product details
+        navigation.navigate('ProductDetails', {
+          productId: products[0].id,
+          barcode: data,
+        });
+      } else {
+        // Product doesn't exist, navigate to add product
+        navigation.navigate('AddProduct', { barcode: data });
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to process barcode');
+      console.error(error);
+    } finally {
+      setLoading(false);
+      setScanned(false);
+    }
+  };
+
+  const handleManualSubmit = async () => {
+    if (manualBarcode.length < 8) {
+      Alert.alert('Error', 'Please enter a valid barcode (minimum 8 digits)');
+      return;
+    }
+
+    setModalVisible(false);
+    setLoading(true);
+
+    try {
+      // Check if product exists
+      const { data: products, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('barcode', manualBarcode)
+        .limit(1);
+
+      if (error) throw error;
+
+      if (products && products.length > 0) {
+        // Product exists, navigate to product details
+        navigation.navigate('ProductDetails', {
+          productId: products[0].id,
+          barcode: manualBarcode,
+        });
+      } else {
+        // Product doesn't exist, navigate to add product
+        navigation.navigate('AddProduct', { barcode: manualBarcode });
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to process barcode');
+      console.error(error);
+    } finally {
+      setLoading(false);
+      setManualBarcode('');
+    }
+  };
+
+  if (!permission?.granted) {
     return (
       <View style={styles.container}>
-        <Text style={styles.permissionText}>No access to camera</Text>
-        <Text style={styles.permissionSubtext}>
-          Camera access is required to scan barcodes. Please enable camera access in your device settings.
-        </Text>
-        <TouchableOpacity 
-          style={styles.button}
-          onPress={requestPermission}
-        >
-          <Text style={styles.buttonText}>Grant Permission</Text>
+        <Text>We need your permission to use the camera</Text>
+        <TouchableOpacity onPress={requestPermission}>
+          <Text>Grant Permission</Text>
         </TouchableOpacity>
       </View>
     );
   }
-
-  const handleBarCodeScanned = async (result: BarcodeScanningResult) => {
-    const { data } = result;
-    
-    if (!data) return;
-
-    try {
-      setScanned(true);
-      setLoading(true);
-
-      // Check if product exists in database
-      const { data: existingProduct, error } = await supabase
-        .from('products')
-        .select('*')
-        .eq('barcode', data)
-        .single();
-
-      if (error) {
-        if (error.code === 'PGRST116') { // Not found error
-          // Navigate to AddProduct
-          navigation.navigate('AddProduct', { barcode: data });
-          return;
-        }
-        throw error;
-      }
-
-      if (existingProduct) {
-        // Navigate to ProductDetails if product exists
-        navigation.navigate('ProductDetails', {
-          productId: existingProduct.id,
-          barcode: data,
-        });
-      }
-    } catch (error) {
-      console.error('Error scanning barcode:', error);
-      Alert.alert('Error', 'Failed to process barcode. Please try again.');
-      setScanned(false);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   return (
     <View style={styles.container}>
@@ -93,7 +120,7 @@ const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
         flashMode={flashMode}
         barcodeScannerSettings={{
           barcodeTypes: ['ean13', 'ean8', 'upc_e', 'qr'],
-          interval: 1000 // Scan every 1 second
+          interval: 1000
         }}
         onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
       >
@@ -103,7 +130,7 @@ const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
             Position barcode within the frame
           </Text>
         </View>
-
+        
         {loading && (
           <View style={styles.loadingContainer}>
             <Text style={styles.loadingText}>Processing barcode...</Text>
@@ -118,10 +145,10 @@ const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
               color="white" 
             />
           </TouchableOpacity>
-          
+
           <TouchableOpacity 
             style={styles.manualButton}
-            onPress={() => navigation.navigate('ManualEntry')}
+            onPress={() => setModalVisible(true)}
           >
             <Text style={styles.manualButtonText}>Enter Barcode Manually</Text>
           </TouchableOpacity>
@@ -136,6 +163,48 @@ const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
           )}
         </View>
       </CameraView>
+
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalContainer}
+        >
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Enter Barcode</Text>
+            <TextInput
+              style={styles.input}
+              value={manualBarcode}
+              onChangeText={setManualBarcode}
+              placeholder="Enter barcode number"
+              keyboardType="number-pad"
+              maxLength={13}
+              autoFocus
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => {
+                  setModalVisible(false);
+                  setManualBarcode('');
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.submitButton]}
+                onPress={handleManualSubmit}
+              >
+                <Text style={styles.submitButtonText}>Submit</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 };
@@ -238,6 +307,63 @@ const styles = StyleSheet.create({
   loadingText: {
     color: 'white',
     marginTop: 10,
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 20,
+    width: '80%',
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 20,
+  },
+  input: {
+    width: '100%',
+    height: 50,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 10,
+    paddingHorizontal: 15,
+    fontSize: 18,
+    marginBottom: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  modalButton: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 10,
+    marginHorizontal: 5,
+  },
+  cancelButton: {
+    backgroundColor: '#f8f8f8',
+  },
+  submitButton: {
+    backgroundColor: '#4A90E2',
+  },
+  cancelButtonText: {
+    color: '#333',
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  submitButtonText: {
+    color: 'white',
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

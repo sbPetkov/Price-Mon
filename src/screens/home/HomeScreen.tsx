@@ -1,12 +1,38 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, TextInput, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, TextInput, SafeAreaView, Modal, TouchableWithoutFeedback, Keyboard, ActivityIndicator, ScrollView, RefreshControl } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../../config/supabase';
 import { useNavigation } from '@react-navigation/native';
 import { debounce } from 'lodash';
+import { Ionicons } from '@expo/vector-icons';
+import { CompositeNavigationProp } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 
-type HomeScreenProps = NativeStackScreenProps<any, 'HomeScreen'>;
+type HomeStackParamList = {
+  HomeScreen: undefined;
+  Search: { searchResults: any[] };
+  ProductDetails: { productId: string };
+  Profile: undefined;
+  Cart: { screen: string };
+};
+
+type RootTabParamList = {
+  Home: undefined;
+  Search: undefined;
+  Profile: undefined;
+  Cart: undefined;
+};
+
+type HomeScreenNavigationProp = CompositeNavigationProp<
+  NativeStackNavigationProp<HomeStackParamList, 'HomeScreen'>,
+  BottomTabNavigationProp<RootTabParamList>
+>;
+
+interface HomeScreenProps {
+  navigation: HomeScreenNavigationProp;
+}
 
 const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const { user } = useAuth();
@@ -15,6 +41,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  const [quantity, setQuantity] = useState('1');
+  const [availableLists, setAvailableLists] = useState<any[]>([]);
+  const [loadingLists, setLoadingLists] = useState(false);
+  const [addingToList, setAddingToList] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     const fetchFavorites = async () => {
@@ -114,6 +147,98 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     }
   };
 
+  const fetchLists = async () => {
+    setLoadingLists(true);
+    try {
+      const { data, error } = await supabase
+        .from('shopping_lists')
+        .select(`
+          *,
+          shopping_list_members!inner (
+            user_id,
+            role
+          )
+        `)
+        .eq('shopping_list_members.user_id', user.id);
+
+      if (error) throw error;
+      setAvailableLists(data || []);
+    } catch (error) {
+      console.error('Error fetching lists:', error);
+      Alert.alert('Error', 'Failed to fetch shopping lists');
+    } finally {
+      setLoadingLists(false);
+    }
+  };
+
+  const handleAddToList = async (listId: string) => {
+    if (!selectedProductId || !user) return;
+    
+    setAddingToList(true);
+    try {
+      // First check if the product already exists in the list
+      const { data: existingItems, error: checkError } = await supabase
+        .from('shopping_list_items')
+        .select('*')
+        .eq('list_id', listId)
+        .eq('product_id', selectedProductId);
+
+      if (checkError) throw checkError;
+
+      if (existingItems && existingItems.length > 0) {
+        // Product exists in the list
+        const existingItem = existingItems[0];
+        const newQuantity = existingItem.completed ? 
+          parseInt(quantity) : 
+          existingItem.quantity + parseInt(quantity);
+
+        // Update the existing item
+        const { error: updateError } = await supabase
+          .from('shopping_list_items')
+          .update({ 
+            quantity: newQuantity,
+            completed: false, // Reset completed status
+            completed_by: null,
+            completed_at: null
+          })
+          .eq('id', existingItem.id);
+
+        if (updateError) throw updateError;
+
+        Alert.alert(
+          'Success', 
+          existingItem.completed 
+            ? 'Item unmarked as completed and quantity updated'
+            : 'Quantity updated for existing item'
+        );
+      } else {
+        // Product doesn't exist in the list, add it as new
+        const { error: insertError } = await supabase
+          .from('shopping_list_items')
+          .insert({
+            list_id: listId,
+            product_id: selectedProductId,
+            quantity: parseInt(quantity),
+            added_by: user.id,
+            created_at: new Date().toISOString(),
+            completed: false
+          });
+
+        if (insertError) throw insertError;
+        Alert.alert('Success', 'Item added to list');
+      }
+
+      setModalVisible(false);
+      setSelectedProductId(null);
+      setQuantity('1');
+    } catch (error) {
+      console.error('Error adding/updating item:', error);
+      Alert.alert('Error', 'Failed to add/update item');
+    } finally {
+      setAddingToList(false);
+    }
+  };
+
   const renderItem = ({ item }) => (
     <TouchableOpacity 
       style={styles.productCard}
@@ -122,12 +247,69 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       <View style={styles.productInfo}>
         <Text style={styles.productName}>{item.products.name}</Text>
         <Text style={styles.productBrand}>{item.products.brand}</Text>
-        <Text style={styles.productPrice}>
-          ${item.latestPrice !== null ? item.latestPrice : 'N/A'}
-        </Text>
+        {item.latestPrice && (
+          <Text style={styles.productPrice}>${item.latestPrice.toFixed(2)}</Text>
+        )}
       </View>
+      
+      <TouchableOpacity
+        style={styles.addToListButton}
+        onPress={() => {
+          setSelectedProductId(item.product_id);
+          setModalVisible(true);
+          fetchLists();
+        }}
+      >
+        <Ionicons name="add-circle-outline" size={24} color="#4A90E2" />
+        <Text style={styles.addToListText}>Add to List</Text>
+      </TouchableOpacity>
     </TouchableOpacity>
   );
+
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const { data, error } = await supabase
+        .from('user_favorites')
+        .select(`
+          product_id,
+          products (
+            name,
+            brand,
+            barcode,
+            product_prices (
+              price,
+              date_observed
+            )
+          )
+        `)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      const favoritesWithPrice = data.map(favorite => {
+        let latestPrice = null;
+        if (
+          favorite.products &&
+          favorite.products.product_prices &&
+          favorite.products.product_prices.length > 0
+        ) {
+          favorite.products.product_prices.sort(
+            (a, b) => new Date(b.date_observed) - new Date(a.date_observed)
+          );
+          latestPrice = favorite.products.product_prices[0].price;
+        }
+        return { ...favorite, latestPrice };
+      });
+
+      setFavorites(favoritesWithPrice);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to refresh favorites');
+      console.error(error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [user.id]);
 
   if (loading) {
     return (
@@ -140,10 +322,18 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.greeting}>
-          Hello, {user?.email?.split('@')[0] || 'User'}
-        </Text>
-        <Text style={styles.subtitle}>Your favorite products</Text>
+        <View style={styles.headerLeft}>
+          <Text style={styles.greeting}>
+            Hello, {user?.email?.split('@')[0] || 'User'}
+          </Text>
+          <Text style={styles.subtitle}>Your favorite products</Text>
+        </View>
+        <TouchableOpacity 
+          style={styles.profileButton}
+          onPress={() => navigation.navigate('Profile')}
+        >
+          <Ionicons name="person-circle-outline" size={32} color="#4A90E2" />
+        </TouchableOpacity>
       </View>
       
       <View style={styles.searchContainer}>
@@ -185,16 +375,87 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         data={favorites}
         renderItem={renderItem}
         keyExtractor={item => item.product_id}
-        contentContainerStyle={styles.listContainer}
+        contentContainerStyle={[
+          styles.listContainer,
+          { paddingTop: showSuggestions && suggestions.length > 0 ? 60 : 15 }
+        ]}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#4A90E2']}
+          />
+        }
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyStateText}>
-              You don't have any favorite products yet.
-            </Text>
-            <Text>Scan products and mark them as favorites to see them here.</Text>
+            <Text style={styles.emptyStateText}>No favorites yet</Text>
+            <Text>Products you favorite will appear here</Text>
           </View>
         }
       />
+
+      <Modal
+        visible={modalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => {
+          Keyboard.dismiss();
+          setModalVisible(false);
+        }}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback onPress={e => e.stopPropagation()}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Add to List</Text>
+                
+                <TextInput
+                  style={styles.quantityInput}
+                  value={quantity}
+                  onChangeText={setQuantity}
+                  keyboardType="number-pad"
+                  placeholder="Quantity"
+                />
+
+                {loadingLists ? (
+                  <ActivityIndicator size="large" color="#4A90E2" />
+                ) : (
+                  <ScrollView style={styles.listContainer}>
+                    <TouchableOpacity
+                      style={styles.listItem}
+                      onPress={() => {
+                        setModalVisible(false);
+                        navigation.navigate('Cart', {
+                          screen: 'CreateList'
+                        });
+                      }}
+                    >
+                      <Ionicons name="add-circle" size={24} color="#4A90E2" />
+                      <Text style={styles.newListText}>Create New List</Text>
+                    </TouchableOpacity>
+
+                    {availableLists.map(list => (
+                      <TouchableOpacity
+                        key={list.id}
+                        style={[
+                          styles.listItem,
+                          addingToList && styles.listItemDisabled
+                        ]}
+                        onPress={() => handleAddToList(list.id)}
+                        disabled={addingToList}
+                      >
+                        <Ionicons name="list" size={24} color="#666" />
+                        <Text style={styles.listName}>{list.name}</Text>
+                        {addingToList && <ActivityIndicator size="small" style={styles.listLoader} />}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                )}
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -205,8 +466,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f8f8',
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     padding: 20,
     backgroundColor: '#fff',
+  },
+  headerLeft: {
+    flex: 1,
   },
   greeting: {
     fontSize: 22,
@@ -306,6 +572,74 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  profileButton: {
+    padding: 8,
+  },
+  addToListButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    marginTop: 8,
+  },
+  addToListText: {
+    marginLeft: 8,
+    color: '#4A90E2',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 20,
+    width: '80%',
+    maxHeight: '80%',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  quantityInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    fontSize: 16,
+  },
+  listItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  listName: {
+    marginLeft: 12,
+    fontSize: 16,
+    color: '#333',
+  },
+  newListText: {
+    marginLeft: 12,
+    fontSize: 16,
+    color: '#4A90E2',
+    fontWeight: '500',
+  },
+  listItemDisabled: {
+    opacity: 0.5,
+  },
+  listLoader: {
+    marginLeft: 12,
   },
 });
 

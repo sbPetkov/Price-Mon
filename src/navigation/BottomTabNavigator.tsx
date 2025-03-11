@@ -2,22 +2,26 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native';
 
 // Import screens
 import HomeScreen from '../screens/home/HomeScreen';
 import ScannerScreen from '../screens/scanner/ScannerScreen';
-import ProfileScreen from '../screens/profile/ProfileScreen';
+import CartScreen from '../screens/cart/CartScreen';
 import ProductDetailsScreen from '../screens/product/ProductDetailsScreen';
 import AddPriceScreen from '../screens/product/AddPriceScreen';
 import AddStoreScreen from '../screens/product/AddStoreScreen';
 import AddProductScreen from '../screens/product/AddProductScreen';
 import SearchScreen from '../screens/search/SearchScreen';
+import ProfileScreen from '../screens/profile/ProfileScreen';
+import ListDetailsScreen from '../screens/cart/ListDetailsScreen';
+import CreateListScreen from '../screens/cart/CreateListScreen';
+import AddListItemScreen from '../screens/cart/AddListItemScreen';
+import CompareStoresScreen from '../screens/cart/CompareStoresScreen';
 
 const Tab = createBottomTabNavigator();
 const HomeStack = createNativeStackNavigator();
 const ScannerStack = createNativeStackNavigator();
-const ProfileStack = createNativeStackNavigator();
+const CartStack = createNativeStackNavigator();
 
 // Home stack
 const HomeStackNavigator = () => {
@@ -34,7 +38,7 @@ const HomeStackNavigator = () => {
       <HomeStack.Screen name="ProductDetails" component={ProductDetailsScreen} options={{ title: 'Product Details' }} />
       <HomeStack.Screen name="AddPrice" component={AddPriceScreen} options={{ title: 'Add Price' }} />
       <HomeStack.Screen name="AddStore" component={AddStoreScreen} options={{ title: 'Add Store' }} />
-      <HomeStack.Screen name="AddProduct" component={AddProductScreen} options={{ title: 'Add Product' }} />
+      <HomeStack.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profile' }} />
     </HomeStack.Navigator>
   );
 };
@@ -83,18 +87,25 @@ const ScannerStackNavigator = () => {
   );
 };
 
-// Profile stack
-const ProfileStackNavigator = () => {
+// Cart stack
+const CartStackNavigator = () => {
   return (
-    <ProfileStack.Navigator
+    <CartStack.Navigator
       screenOptions={{
         headerShown: true,
-        gestureEnabled: true,
-        gestureDirection: 'horizontal',
       }}
     >
-      <ProfileStack.Screen name="ProfileScreen" component={ProfileScreen} options={{ title: 'My Profile' }} />
-    </ProfileStack.Navigator>
+      <CartStack.Screen name="Lists" component={CartScreen} />
+      <CartStack.Screen name="ListDetails" component={ListDetailsScreen} />
+      <CartStack.Screen name="CreateList" component={CreateListScreen} />
+      <CartStack.Screen name="AddListItem" component={AddListItemScreen} />
+      <CartStack.Screen name="ProductDetails" component={ProductDetailsScreen} />
+      <CartStack.Screen 
+        name="CompareStores" 
+        component={CompareStoresScreen}
+        options={{ title: 'Compare Stores' }}
+      />
+    </CartStack.Navigator>
   );
 };
 
@@ -109,8 +120,8 @@ const BottomTabNavigator = () => {
             iconName = focused ? 'home' : 'home-outline';
           } else if (route.name === 'Scanner') {
             iconName = focused ? 'barcode' : 'barcode-outline';
-          } else if (route.name === 'Profile') {
-            iconName = focused ? 'person' : 'person-outline';
+          } else if (route.name === 'Cart') {
+            iconName = focused ? 'cart' : 'cart-outline';
           }
 
           return <Ionicons name={iconName} size={size} color={color} />;
@@ -118,9 +129,9 @@ const BottomTabNavigator = () => {
         headerShown: false,
       })}
     >
-      <Tab.Screen name="Home" component={HomeStackNavigator} options={{ headerShown: false }} />
-      <Tab.Screen name="Scanner" component={ScannerStackNavigator} options={{ headerShown: false }} />
-      <Tab.Screen name="Profile" component={ProfileStackNavigator} options={{ headerShown: false }} />
+      <Tab.Screen name="Home" component={HomeStackNavigator} />
+      <Tab.Screen name="Scanner" component={ScannerStackNavigator} />
+      <Tab.Screen name="Cart" component={CartStackNavigator} />
     </Tab.Navigator>
   );
 };
