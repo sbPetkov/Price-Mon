@@ -20,6 +20,7 @@ const CartScreen = () => {
   const [lists, setLists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [userRoles, setUserRoles] = useState<{[key: string]: string}>({});
 
   const fetchLists = async () => {
     try {
@@ -39,12 +40,32 @@ const CartScreen = () => {
 
       if (error) throw error;
       setLists(data || []);
+      fetchUserRoles(data || []);
     } catch (error) {
       Alert.alert('Error', 'Failed to fetch shopping lists');
       console.error(error);
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const fetchUserRoles = async (lists) => {
+    try {
+      const { data, error } = await supabase
+        .from('shopping_list_members')
+        .select('list_id, role')
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      const roles = {};
+      data.forEach(item => {
+        roles[item.list_id] = item.role;
+      });
+      setUserRoles(roles);
+    } catch (error) {
+      console.error('Error fetching user roles:', error);
     }
   };
 
@@ -90,30 +111,74 @@ const CartScreen = () => {
     );
   };
 
+  const handleLeaveList = async (listId: string) => {
+    Alert.alert(
+      'Leave List',
+      'Are you sure you want to leave this list?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('shopping_list_members')
+                .delete()
+                .eq('list_id', listId)
+                .eq('user_id', user.id);
+
+              if (error) throw error;
+              fetchLists();
+            } catch (error) {
+              console.error('Error leaving list:', error);
+              Alert.alert('Error', 'Failed to leave list');
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const renderItem = ({ item }) => (
-    <TouchableOpacity
-      style={styles.listCard}
-      onPress={() => navigation.navigate('ListDetails', { listId: item.id })}
-    >
-      <View style={styles.listInfo}>
+    <View style={styles.listCard}>
+      <TouchableOpacity
+        style={styles.listInfo}
+        onPress={() => navigation.navigate('ListDetails', { listId: item.id })}
+      >
         <Text style={styles.listName}>{item.name}</Text>
         <Text style={styles.listMeta}>
           {item.shopping_list_items.length} items
         </Text>
-      </View>
+      </TouchableOpacity>
+
       <View style={styles.listActions}>
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            handleDeleteList(item.id);
-          }}
-        >
-          <Ionicons name="trash-outline" size={20} color="#FF3B30" />
-        </TouchableOpacity>
-        <Ionicons name="chevron-forward" size={24} color="#666" />
+        {userRoles[item.id] === 'owner' && (
+          <TouchableOpacity
+            style={styles.settingsButton}
+            onPress={() => navigation.navigate('ListSettings', { listId: item.id })}
+          >
+            <Ionicons name="settings-outline" size={24} color="#4A90E2" />
+          </TouchableOpacity>
+        )}
+        
+        {userRoles[item.id] === 'owner' ? (
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={() => handleDeleteList(item.id)}
+          >
+            <Ionicons name="trash-outline" size={24} color="#FF3B30" />
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.leaveButton}
+            onPress={() => handleLeaveList(item.id)}
+          >
+            <Ionicons name="exit-outline" size={24} color="#FF9500" />
+          </TouchableOpacity>
+        )}
       </View>
-    </TouchableOpacity>
+    </View>
   );
 
   return (
@@ -227,6 +292,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     textAlign: 'center',
+  },
+  settingsButton: {
+    padding: 8,
+    marginRight: 8,
+  },
+  leaveButton: {
+    padding: 8,
   },
 });
 

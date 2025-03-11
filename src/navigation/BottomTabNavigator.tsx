@@ -17,6 +17,7 @@ import ListDetailsScreen from '../screens/cart/ListDetailsScreen';
 import CreateListScreen from '../screens/cart/CreateListScreen';
 import AddListItemScreen from '../screens/cart/AddListItemScreen';
 import CompareStoresScreen from '../screens/cart/CompareStoresScreen';
+import ListSettingsScreen from '../screens/cart/ListSettingsScreen';
 
 const Tab = createBottomTabNavigator();
 const HomeStack = createNativeStackNavigator();
@@ -104,6 +105,11 @@ const CartStackNavigator = () => {
         name="CompareStores" 
         component={CompareStoresScreen}
         options={{ title: 'Compare Stores' }}
+      />
+      <CartStack.Screen 
+        name="ListSettings" 
+        component={ListSettingsScreen}
+        options={{ title: 'List Settings' }}
       />
     </CartStack.Navigator>
   );
