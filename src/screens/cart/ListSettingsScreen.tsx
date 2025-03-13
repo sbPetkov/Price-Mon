@@ -47,24 +47,19 @@ const ListSettingsScreen = () => {
       if (memberError) throw memberError;
   
       const userIds = memberData.map(member => member.user_id);
-      if (userIds.length === 0) {
-        setMembers([]);
-        setLoading(false);
-        return;
-      }
   
-      // Fetch emails from the profiles table
+      // Fetch emails from the profiles table using user_id
       const { data: userData, error: userError } = await supabase
         .from('profiles')
-        .select('id, email')
-        .in('id', userIds);
+        .select('user_id, email')
+        .in('user_id', userIds);
   
       if (userError) throw userError;
   
       // Merge users with emails
       const formattedMembers = memberData.map(member => ({
         id: member.id,
-        email: userData.find(user => user.id === member.user_id)?.email || 'Email not found',
+        email: userData.find(user => user.user_id === member.user_id)?.email || 'Email not found',
         role: member.role,
         userId: member.user_id
       }));
@@ -72,7 +67,6 @@ const ListSettingsScreen = () => {
       setMembers(formattedMembers);
       setIsOwner(formattedMembers.some(m => m.userId === user?.id && m.role === 'owner'));
     } catch (error) {
-      console.error('Error fetching members:', error);
       Alert.alert('Error', 'Failed to fetch list members');
     } finally {
       setLoading(false);
@@ -121,7 +115,7 @@ const ListSettingsScreen = () => {
       // First, find the user by email
       const { data: userData, error: userError } = await supabase
         .from('profiles')
-        .select('id')
+        .select('user_id')
         .eq('email', email.trim().toLowerCase())
         .single();
 
@@ -139,7 +133,7 @@ const ListSettingsScreen = () => {
         .from('shopping_list_members')
         .select('id')
         .eq('list_id', listId)
-        .eq('user_id', userData.id)
+        .eq('user_id', userData.user_id)
         .single();
 
       if (!checkError && existingMember) {
@@ -152,16 +146,16 @@ const ListSettingsScreen = () => {
         .from('shopping_list_members')
         .insert({
           list_id: listId,
-          user_id: userData.id,
-          role: 'editor', // Default role for new members
+          user_id: userData.user_id,
+          role: 'editor',
           joined_at: new Date().toISOString()
         });
 
       if (insertError) throw insertError;
 
       Alert.alert('Success', 'Member added successfully');
-      setEmail(''); // Clear the input
-      fetchMembers(); // Refresh the members list
+      setEmail('');
+      fetchMembers();
     } catch (error) {
       console.error('Error adding member:', error);
       Alert.alert('Error', 'Failed to add member');
@@ -316,6 +310,10 @@ const styles = StyleSheet.create({
   },
   removeButton: {
     padding: 4,
+  },
+  addMemberButton: {
+    padding: 8,
+    marginRight: 8,
   },
 });
 
