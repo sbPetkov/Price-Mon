@@ -9,6 +9,8 @@ import {
   Alert,
   SafeAreaView,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { supabase } from '../../config/supabase';
@@ -106,7 +108,7 @@ const AddListItemScreen = () => {
         Alert.alert('Success', 'Item added to list');
       }
 
-      navigation.goBack();
+      navigation.navigate('ListDetails', { listId, refresh: true });
     } catch (error) {
       console.error('Error adding/updating item:', error);
       Alert.alert('Error', 'Failed to add/update item');
@@ -133,55 +135,60 @@ const AddListItemScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.searchContainer}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search products..."
-          value={searchQuery}
-          onChangeText={(text) => {
-            setSearchQuery(text);
-            searchProducts(text);
-          }}
-        />
-        {loading && (
-          <ActivityIndicator style={styles.loadingIndicator} />
-        )}
-      </View>
-
-      <FlatList
-        data={searchResults}
-        renderItem={renderSearchResult}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.resultsList}
-        ListEmptyComponent={
-          searchQuery.length > 0 && !loading ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyStateText}>No products found</Text>
-            </View>
-          ) : null
-        }
-      />
-
-      {selectedProduct && (
-        <View style={styles.footer}>
-          <View style={styles.quantityContainer}>
-            <Text style={styles.quantityLabel}>Quantity:</Text>
-            <TextInput
-              style={styles.quantityInput}
-              value={quantity}
-              onChangeText={setQuantity}
-              keyboardType="numeric"
-              maxLength={2}
-            />
-          </View>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => handleAddToList(selectedProduct, parseInt(quantity))}
-          >
-            <Text style={styles.addButtonText}>Add to List</Text>
-          </TouchableOpacity>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardAvoid}
+      >
+        <View style={styles.searchContainer}>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search products..."
+            value={searchQuery}
+            onChangeText={(text) => {
+              setSearchQuery(text);
+              searchProducts(text);
+            }}
+          />
+          {loading && (
+            <ActivityIndicator style={styles.loadingIndicator} />
+          )}
         </View>
-      )}
+
+        <FlatList
+          data={searchResults}
+          renderItem={renderSearchResult}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.resultsList}
+          ListEmptyComponent={
+            searchQuery.length > 0 && !loading ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>No products found</Text>
+              </View>
+            ) : null
+          }
+        />
+
+        {selectedProduct && (
+          <View style={styles.footer}>
+            <View style={styles.quantityContainer}>
+              <Text style={styles.quantityLabel}>Quantity:</Text>
+              <TextInput
+                style={styles.quantityInput}
+                value={quantity}
+                onChangeText={setQuantity}
+                keyboardType="numeric"
+                maxLength={2}
+              />
+            </View>
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => handleAddToList(selectedProduct, parseInt(quantity))}
+            >
+              <Text style={styles.addButtonText}>Add to List</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };

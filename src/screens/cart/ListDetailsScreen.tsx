@@ -9,7 +9,7 @@ import {
   SafeAreaView,
   RefreshControl,
 } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../config/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 const ListDetailsScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { listId } = route.params;
+  const { listId, refresh } = route.params;
   const { user } = useAuth();
   const [list, setList] = useState(null);
   const [items, setItems] = useState([]);
@@ -70,6 +70,18 @@ const ListDetailsScreen = () => {
   useEffect(() => {
     fetchListDetails();
   }, [listId]);
+
+  useEffect(() => {
+    if (refresh) {
+      fetchListDetails();
+    }
+  }, [refresh]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchListDetails();
+    }, [listId])
+  );
 
   const onRefresh = React.useCallback(() => {
     setRefreshing(true);

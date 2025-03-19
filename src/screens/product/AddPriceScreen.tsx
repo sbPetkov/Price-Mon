@@ -82,7 +82,7 @@ const AddPriceScreen = () => {
       if (error) throw error;
 
       Alert.alert('Success', 'Price added successfully!');
-      navigation.goBack();
+      navigation.navigate('ProductDetails', { productId, refresh: true });
     } catch (error) {
       Alert.alert('Error', 'Failed to add price');
       console.error('Error adding price:', error);

@@ -13,7 +13,7 @@ import {
   SafeAreaView,
   StatusBar,
 } from 'react-native';
-import { useRoute, useNavigation } from '@react-navigation/native';
+import { useRoute, useNavigation, useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../config/supabase';
 import { LineChart } from 'react-native-chart-kit';
 import { useAuth } from '../../context/AuthContext';
@@ -21,7 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 const ProductDetailsScreen = () => {
   const route = useRoute();
   const navigation = useNavigation();
-  const { productId, barcode } = route.params;
+  const { productId, barcode, refresh } = route.params;
   const { user } = useAuth();
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -88,6 +88,18 @@ const ProductDetailsScreen = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (refresh) {
+      fetchData();
+    }
+  }, [refresh]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchData();
+    }, [productId])
+  );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
