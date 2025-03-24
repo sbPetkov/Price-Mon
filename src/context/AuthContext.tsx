@@ -3,7 +3,7 @@ import { supabase } from '../config/supabase';
 import { Session, User } from '@supabase/supabase-js';
 import * as SecureStore from 'expo-secure-store';
 
-type AuthContextType = {
+interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
@@ -11,7 +11,8 @@ type AuthContextType = {
   signUp: (email: string, password: string, firstName: string, lastName: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: any }>;
-};
+  updateUser: (userData: Partial<User>) => Promise<void>;
+}
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -94,6 +95,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const updateUser = async (userData: Partial<User>) => {
+    // Logic to update user in your database
+    setUser((prevUser) => ({ ...prevUser, ...userData })); // Update local state
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -104,6 +110,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signUp,
         signOut,
         resetPassword,
+        updateUser,
       }}
     >
       {children}

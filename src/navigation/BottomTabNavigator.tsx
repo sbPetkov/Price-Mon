@@ -18,6 +18,8 @@ import CreateListScreen from '../screens/cart/CreateListScreen';
 import AddListItemScreen from '../screens/cart/AddListItemScreen';
 import CompareStoresScreen from '../screens/cart/CompareStoresScreen';
 import ListSettingsScreen from '../screens/cart/ListSettingsScreen';
+import ProfileSettingsScreen from '../screens/profile/ProfileSettingsScreen';
+import EditPriceScreen from '../screens/product/EditPriceScreen';
 
 const Tab = createBottomTabNavigator();
 const HomeStack = createNativeStackNavigator();
@@ -40,6 +42,8 @@ const HomeStackNavigator = () => {
       <HomeStack.Screen name="AddPrice" component={AddPriceScreen} options={{ title: 'Add Price' }} />
       <HomeStack.Screen name="AddStore" component={AddStoreScreen} options={{ title: 'Add Store' }} />
       <HomeStack.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profile' }} />
+      <HomeStack.Screen name="ProfileSettings" component={ProfileSettingsScreen} options={{ title: 'Profile Settings' }} />
+      <HomeStack.Screen name="EditPrice" component={EditPriceScreen} options={{ title: 'Edit Price' }} />
     </HomeStack.Navigator>
   );
 };
