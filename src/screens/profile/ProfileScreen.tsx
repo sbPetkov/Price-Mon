@@ -7,13 +7,28 @@ import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../config/supabase';
 
+interface PriceItem {
+  id: string;
+  price: number;
+  date_observed: string;
+  user_id: string;
+  products: {
+    name: string;
+  };
+}
+
 const ProfileScreen = () => {
-  const { user } = useAuth();
-  const navigation = useNavigation();
-  const [recentlyAddedPrices, setRecentlyAddedPrices] = useState([]);
+  const { user, profile, fetchProfile } = useAuth();
+  const navigation = useNavigation<any>();
+  const [recentlyAddedPrices, setRecentlyAddedPrices] = useState<PriceItem[]>([]);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const itemsPerPage = 10;
+
+  useEffect(() => {
+    fetchRecentlyAddedPrices();
+    fetchProfile();
+  }, [page]);
 
   const fetchRecentlyAddedPrices = async () => {
     setLoading(true);
@@ -30,7 +45,7 @@ const ProfileScreen = () => {
 
       if (error) throw error;
 
-      setRecentlyAddedPrices(data);
+      setRecentlyAddedPrices(data as unknown as PriceItem[] || []);
     } catch (error) {
       Alert.alert('Error', 'Failed to fetch recently added prices');
       console.error(error);
@@ -39,15 +54,11 @@ const ProfileScreen = () => {
     }
   };
 
-  useEffect(() => {
-    fetchRecentlyAddedPrices();
-  }, [page]);
-
-  const handleEditPrice = (priceId) => {
+  const handleEditPrice = (priceId: string) => {
     navigation.navigate('EditPrice', { priceId });
   };
 
-  const confirmDeletePrice = (priceId) => {
+  const confirmDeletePrice = (priceId: string) => {
     Alert.alert(
       'Confirm Delete',
       'Are you sure you want to delete this price?',
@@ -58,7 +69,7 @@ const ProfileScreen = () => {
     );
   };
 
-  const handleDeletePrice = async (priceId) => {
+  const handleDeletePrice = async (priceId: string) => {
     setLoading(true);
     try {
       const { error } = await supabase
@@ -79,7 +90,7 @@ const ProfileScreen = () => {
     }
   };
 
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     const day = String(date.getDate()).padStart(2, '0');
     const month = date.toLocaleString('en-US', { month: 'short' }).toUpperCase();
@@ -87,7 +98,7 @@ const ProfileScreen = () => {
     return `${day}/${month}/${year}`;
   };
 
-  const renderItem = ({ item }) => (
+  const renderItem = ({ item }: { item: PriceItem }) => (
     <View style={styles.priceItem}>
       <Text style={styles.productName} numberOfLines={1} ellipsizeMode="tail">
         {item.products?.name || "Unknown Product"}
@@ -105,12 +116,27 @@ const ProfileScreen = () => {
     </View>
   );
 
+  const getFullName = () => {
+    if (profile) {
+      const firstName = profile.first_name || '';
+      const lastName = profile.last_name || '';
+      if (firstName || lastName) {
+        return `${firstName} ${lastName}`.trim();
+      }
+    }
+    return 'N/A';
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Profile</Text>
-      <Text style={styles.label}>Email: {user?.email}</Text>
-      <Text style={styles.label}>Name: {user?.name || 'N/A'}</Text>
-      <Text style={styles.label}>Phone: {user?.phone || 'N/A'}</Text>
+      
+      <View style={styles.profileInfo}>
+        <Text style={styles.label}>Email: {user?.email}</Text>
+        <Text style={styles.label}>Name: {getFullName()}</Text>
+        {profile && profile.city && <Text style={styles.label}>City: {profile.city}</Text>}
+        {profile && profile.phone_number && <Text style={styles.label}>Phone: {profile.phone_number}</Text>}
+      </View>
 
       <Text style={styles.sectionTitle}>Recently Added Prices</Text>
       {loading ? (
@@ -167,6 +193,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
+    marginBottom: 20,
+  },
+  profileInfo: {
+    backgroundColor: '#f5f5f5',
+    padding: 15,
+    borderRadius: 10,
     marginBottom: 20,
   },
   label: {

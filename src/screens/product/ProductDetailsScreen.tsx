@@ -12,26 +12,39 @@ import {
   RefreshControl,
   SafeAreaView,
   StatusBar,
+  TextInput,
+  TouchableWithoutFeedback,
+  Keyboard,
 } from 'react-native';
 import { useRoute, useNavigation, useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../config/supabase';
 import { LineChart } from 'react-native-chart-kit';
 import { useAuth } from '../../context/AuthContext';
+import { Ionicons } from '@expo/vector-icons';
 
 const ProductDetailsScreen = () => {
   const route = useRoute();
   const navigation = useNavigation();
   const { productId, barcode, refresh } = route.params;
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [allPriceHistory, setAllPriceHistory] = useState([]);
   const [priceHistory, setPriceHistory] = useState([]);
+  const [timeRange, setTimeRange] = useState('1month'); // '1month', '6months', 'all'
   const [cheapestStores, setCheapestStores] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedDataPoint, setSelectedDataPoint] = useState(null);
   const [isFavorite, setIsFavorite] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const screenWidth = Dimensions.get('window').width;
+
+  // Add shopping list related state
+  const [listModalVisible, setListModalVisible] = useState(false);
+  const [availableLists, setAvailableLists] = useState([]);
+  const [loadingLists, setLoadingLists] = useState(false);
+  const [addingToList, setAddingToList] = useState(false);
+  const [quantity, setQuantity] = useState('1');
 
   const fetchData = useCallback(async () => {
     try {
@@ -65,16 +78,17 @@ const ProductDetailsScreen = () => {
 
       if (favoriteError) throw favoriteError;
 
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      const filteredPrices = productData.product_prices.filter(price => 
-        new Date(price.date_observed) >= thirtyDaysAgo
+      // Sort price history by date, oldest to newest
+      const sortedPrices = productData.product_prices.sort((a, b) => 
+        new Date(a.date_observed) - new Date(b.date_observed)
       );
 
-      setProduct(productData);
-      setPriceHistory(filteredPrices);
-      findCheapestStores(filteredPrices);
+      setAllPriceHistory(sortedPrices);
       setIsFavorite(favoriteData.length > 0);
+      setProduct(productData);
+      
+      // Initial filtering based on default time range
+      filterPriceHistoryByTimeRange(sortedPrices, timeRange);
       
     } catch (error) {
       Alert.alert('Error', 'Failed to fetch data');
@@ -85,6 +99,36 @@ const ProductDetailsScreen = () => {
     }
   }, [productId, user.id]);
 
+  const filterPriceHistoryByTimeRange = (prices, range) => {
+    let filteredPrices = [];
+    const now = new Date();
+    
+    switch (range) {
+      case '1month':
+        const oneMonthAgo = new Date(now);
+        oneMonthAgo.setMonth(now.getMonth() - 1);
+        filteredPrices = prices.filter(price => 
+          new Date(price.date_observed) >= oneMonthAgo
+        );
+        break;
+      case '6months':
+        const sixMonthsAgo = new Date(now);
+        sixMonthsAgo.setMonth(now.getMonth() - 6);
+        filteredPrices = prices.filter(price => 
+          new Date(price.date_observed) >= sixMonthsAgo
+        );
+        break;
+      case 'all':
+        filteredPrices = [...prices];
+        break;
+      default:
+        filteredPrices = prices;
+    }
+
+    setPriceHistory(filteredPrices);
+    findCheapestStores(filteredPrices);
+  };
+
   useEffect(() => {
     fetchData();
   }, [fetchData]);
@@ -94,6 +138,12 @@ const ProductDetailsScreen = () => {
       fetchData();
     }
   }, [refresh]);
+
+  useEffect(() => {
+    if (allPriceHistory.length > 0) {
+      filterPriceHistoryByTimeRange(allPriceHistory, timeRange);
+    }
+  }, [timeRange]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -132,6 +182,97 @@ const ProductDetailsScreen = () => {
     } catch (error) {
       Alert.alert('Error', 'Failed to update favorite status');
       console.error(error);
+    }
+  };
+
+  const fetchLists = async () => {
+    setLoadingLists(true);
+    try {
+      const { data, error } = await supabase
+        .from('shopping_lists')
+        .select(`
+          *,
+          shopping_list_members!inner (
+            user_id,
+            role
+          )
+        `)
+        .eq('shopping_list_members.user_id', user.id);
+
+      if (error) throw error;
+      setAvailableLists(data || []);
+    } catch (error) {
+      console.error('Error fetching lists:', error);
+      Alert.alert('Error', 'Failed to fetch shopping lists');
+    } finally {
+      setLoadingLists(false);
+    }
+  };
+
+  const handleAddToList = async (listId) => {
+    if (!productId || !user) return;
+    
+    setAddingToList(true);
+    try {
+      // First check if the product already exists in the list
+      const { data: existingItems, error: checkError } = await supabase
+        .from('shopping_list_items')
+        .select('*')
+        .eq('list_id', listId)
+        .eq('product_id', productId);
+
+      if (checkError) throw checkError;
+
+      if (existingItems && existingItems.length > 0) {
+        // Product exists in the list
+        const existingItem = existingItems[0];
+        const newQuantity = existingItem.completed ? 
+          parseInt(quantity) : 
+          existingItem.quantity + parseInt(quantity);
+
+        // Update the existing item
+        const { error: updateError } = await supabase
+          .from('shopping_list_items')
+          .update({ 
+            quantity: newQuantity,
+            completed: false, // Reset completed status
+            completed_by: null,
+            completed_at: null
+          })
+          .eq('id', existingItem.id);
+
+        if (updateError) throw updateError;
+
+        Alert.alert(
+          'Success', 
+          existingItem.completed 
+            ? 'Item unmarked as completed and quantity updated'
+            : 'Quantity updated for existing item'
+        );
+      } else {
+        // Product doesn't exist in the list, add it as new
+        const { error: insertError } = await supabase
+          .from('shopping_list_items')
+          .insert({
+            list_id: listId,
+            product_id: productId,
+            quantity: parseInt(quantity),
+            added_by: user.id,
+            created_at: new Date().toISOString(),
+            completed: false
+          });
+
+        if (insertError) throw insertError;
+        Alert.alert('Success', 'Item added to list');
+      }
+
+      setListModalVisible(false);
+      setQuantity('1');
+    } catch (error) {
+      console.error('Error adding/updating item:', error);
+      Alert.alert('Error', 'Failed to add/update item');
+    } finally {
+      setAddingToList(false);
     }
   };
 
@@ -178,6 +319,43 @@ const ProductDetailsScreen = () => {
     setModalVisible(true);
   };
 
+  // Format date for x-axis labels to prevent overlapping
+  const formatChartDate = (dateString) => {
+    const date = new Date(dateString);
+    
+    // Different format based on time range to prevent overlapping
+    if (timeRange === '1month') {
+      return `${date.getDate()}/${date.getMonth() + 1}`;
+    } else if (timeRange === '6months') {
+      return `${date.getMonth() + 1}/${date.getFullYear().toString().substr(2)}`;
+    } else {
+      // For 'all' data, use month/year format
+      return `${date.getMonth() + 1}/${date.getFullYear().toString().substr(2)}`;
+    }
+  };
+
+  // Get limited number of labels to prevent overlapping
+  const getChartLabels = () => {
+    if (!priceHistory || priceHistory.length === 0) return [];
+    
+    // For small datasets, show all labels
+    if (priceHistory.length <= 5) {
+      return priceHistory.map(entry => formatChartDate(entry.date_observed));
+    }
+    
+    // For larger datasets, only show some labels to prevent overlapping
+    let interval;
+    if (priceHistory.length > 20) {
+      interval = Math.ceil(priceHistory.length / 5); // Show ~5 labels
+    } else {
+      interval = Math.ceil(priceHistory.length / Math.min(priceHistory.length, 5));
+    }
+    
+    return priceHistory.map((entry, index) => 
+      index % interval === 0 ? formatChartDate(entry.date_observed) : ''
+    );
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -200,6 +378,16 @@ const ProductDetailsScreen = () => {
     );
   }
 
+  // Get time range display text
+  const getTimeRangeText = () => {
+    switch(timeRange) {
+      case '1month': return '1 Month';
+      case '6months': return '6 Months';
+      case 'all': return 'All Time';
+      default: return '1 Month';
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
@@ -215,30 +403,69 @@ const ProductDetailsScreen = () => {
             />
           }
         >
-          <TouchableOpacity onPress={toggleFavorite} style={styles.favoriteButton}>
-            <Text style={styles.favoriteText}>{isFavorite ? '★' : '☆'}</Text>
-          </TouchableOpacity>
-          
-          <Text style={styles.title}>{product.name}</Text>
-          <Text style={styles.brand}>Brand: {product.brand}</Text>
+          <View style={styles.headerContainer}>
+            <Text style={styles.title}>{product.name}</Text>
+            <Text style={styles.brand}>Brand: {product.brand}</Text>
+          </View>
           
           {priceHistory && priceHistory.length > 0 ? (
             <>
               <Text style={styles.price}>
-                Average Price (30 days): ${calculateAveragePrice()?.toFixed(2) || 'N/A'}
+                Average Price ({getTimeRangeText()}): ${calculateAveragePrice()?.toFixed(2) || 'N/A'}
               </Text>
 
-              <Text style={styles.subtitle}>Cheapest Stores (Last 30 Days):</Text>
+              <Text style={styles.subtitle}>Cheapest Stores ({getTimeRangeText()}):</Text>
               {cheapestStores.slice(0, 3).map((store, index) => (
                 <Text key={index} style={styles.storeText}>
                   {store.name} ({store.city}): ${store.average.toFixed(2)}
                 </Text>
               ))}
 
+              <View style={styles.timeRangeContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.timeRangeButton,
+                    timeRange === '1month' && styles.timeRangeButtonActive
+                  ]}
+                  onPress={() => setTimeRange('1month')}
+                >
+                  <Text style={[
+                    styles.timeRangeText,
+                    timeRange === '1month' && styles.timeRangeTextActive
+                  ]}>1 Month</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.timeRangeButton,
+                    timeRange === '6months' && styles.timeRangeButtonActive
+                  ]}
+                  onPress={() => setTimeRange('6months')}
+                >
+                  <Text style={[
+                    styles.timeRangeText,
+                    timeRange === '6months' && styles.timeRangeTextActive
+                  ]}>6 Months</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.timeRangeButton,
+                    timeRange === 'all' && styles.timeRangeButtonActive
+                  ]}
+                  onPress={() => setTimeRange('all')}
+                >
+                  <Text style={[
+                    styles.timeRangeText,
+                    timeRange === 'all' && styles.timeRangeTextActive
+                  ]}>All Time</Text>
+                </TouchableOpacity>
+              </View>
+
               <Text style={styles.subtitle}>Price History:</Text>
               <LineChart
                 data={{
-                  labels: priceHistory.map(entry => new Date(entry.date_observed).toLocaleDateString()),
+                  labels: getChartLabels(),
                   datasets: [{ data: priceHistory.map(entry => entry.price) }]
                 }}
                 width={screenWidth - 40}
@@ -252,7 +479,9 @@ const ProductDetailsScreen = () => {
                   color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
                   labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
                   style: { borderRadius: 16 },
-                  propsForDots: { r: '6', strokeWidth: '2', stroke: '#ffa726' }
+                  propsForDots: { r: '6', strokeWidth: '2', stroke: '#ffa726' },
+                  // Adjust spacing for better readability
+                  horizontalLabelRotation: 30,
                 }}
                 bezier
                 style={styles.chart}
@@ -271,15 +500,56 @@ const ProductDetailsScreen = () => {
           )}
 
           <Text style={styles.description}>{product.description}</Text>
+          
+          <View style={styles.spacer} />
         </ScrollView>
 
-        <TouchableOpacity 
-          style={styles.addPriceButton}
-          onPress={() => navigation.navigate('AddPrice', { productId, barcode })}
-        >
-          <Text style={styles.addPriceText}>Add Price</Text>
-        </TouchableOpacity>
+        <View style={styles.bottomButtons}>
+          <View style={styles.actionButtonsRow}>
+            <TouchableOpacity onPress={toggleFavorite} style={styles.actionButton}>
+              <Ionicons 
+                name={isFavorite ? "heart" : "heart-outline"} 
+                size={26} 
+                color={isFavorite ? "#FF6B6B" : "#4A90E2"} 
+              />
+              <Text style={styles.actionButtonText}>
+                {isFavorite ? "Favorited" : "Favorite"}
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => navigation.navigate('PriceAlert', { 
+                productId, 
+                productName: product.name,
+                userCity: profile?.city || ''
+              })}
+            >
+              <Ionicons name="notifications-outline" size={26} color="#4A90E2" />
+              <Text style={styles.actionButtonText}>Price Alert</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => {
+                setListModalVisible(true);
+                fetchLists();
+              }}
+            >
+              <Ionicons name="cart-outline" size={26} color="#4A90E2" />
+              <Text style={styles.actionButtonText}>Add to List</Text>
+            </TouchableOpacity>
+          </View>
 
+          <TouchableOpacity 
+            style={styles.addPriceButton}
+            onPress={() => navigation.navigate('AddPrice', { productId, barcode })}
+          >
+            <Text style={styles.addPriceText}>Add Price</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Price Data Point Modal */}
         <Modal
           animationType="fade"
           transparent={true}
@@ -315,6 +585,77 @@ const ProductDetailsScreen = () => {
             </View>
           </View>
         </Modal>
+
+        {/* Shopping List Modal */}
+        <Modal
+          visible={listModalVisible}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setListModalVisible(false)}
+        >
+          <TouchableWithoutFeedback onPress={() => {
+            Keyboard.dismiss();
+            setListModalVisible(false);
+          }}>
+            <View style={styles.centeredView}>
+              <TouchableWithoutFeedback onPress={e => e.stopPropagation()}>
+                <View style={styles.modalView}>
+                  <Text style={styles.modalTitle}>Add to List</Text>
+                  
+                  <TextInput
+                    style={styles.quantityInput}
+                    value={quantity}
+                    onChangeText={setQuantity}
+                    keyboardType="number-pad"
+                    placeholder="Quantity"
+                  />
+
+                  {loadingLists ? (
+                    <ActivityIndicator size="large" color="#4A90E2" />
+                  ) : (
+                    <ScrollView style={styles.listScrollContainer}>
+                      <TouchableOpacity
+                        style={styles.listItem}
+                        onPress={() => {
+                          setListModalVisible(false);
+                          navigation.navigate('Cart', {
+                            screen: 'CreateList'
+                          });
+                        }}
+                      >
+                        <Ionicons name="add-circle" size={24} color="#4A90E2" />
+                        <Text style={styles.newListText}>Create New List</Text>
+                      </TouchableOpacity>
+
+                      {availableLists.map(list => (
+                        <TouchableOpacity
+                          key={list.id}
+                          style={[
+                            styles.listItem,
+                            addingToList && styles.listItemDisabled
+                          ]}
+                          onPress={() => handleAddToList(list.id)}
+                          disabled={addingToList}
+                        >
+                          <Ionicons name="list" size={24} color="#666" />
+                          <Text style={styles.listName}>{list.name}</Text>
+                          {addingToList && <ActivityIndicator size="small" style={styles.listLoader} />}
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  )}
+                  
+                  <TouchableOpacity
+                    style={styles.closeButton}
+                    onPress={() => setListModalVisible(false)}
+                  >
+                    <Text style={styles.closeButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
       </View>
     </SafeAreaView>
   );
@@ -331,7 +672,10 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 20,
-    paddingBottom: 100,
+    paddingBottom: 120, // Extra padding at bottom for the buttons
+  },
+  headerContainer: {
+    marginBottom: 15,
   },
   loadingContainer: {
     flex: 1,
@@ -375,17 +719,48 @@ const styles = StyleSheet.create({
     marginVertical: 8,
     borderRadius: 16,
   },
-  addPriceButton: {
+  bottomButtons: {
     position: 'absolute',
-    bottom: 20,
-    left: 20,
-    right: 20,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+    elevation: 10,
+  },
+  actionButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#f0f5ff',
+    width: '31%',
+  },
+  actionButtonText: {
+    marginLeft: 8,
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#4A90E2',
+  },
+  addPriceButton: {
     backgroundColor: '#9ACD32',
     paddingVertical: 15,
     borderRadius: 10,
     alignItems: 'center',
-    elevation: 5,
-    zIndex: 1,
   },
   addPriceText: {
     color: 'white',
@@ -402,7 +777,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     borderRadius: 20,
     padding: 25,
-    width: '80%',
+    width: '85%',
+    maxHeight: '80%',
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -411,7 +787,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   modalTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
     marginBottom: 15,
     color: '#333',
@@ -438,18 +814,28 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: '500',
   },
-  favoriteButton: {
-    position: 'absolute',
-    top: 20,
-    right: 20,
-    backgroundColor: '#4A90E2',
-    padding: 8,
-    borderRadius: 20,
-    zIndex: 1,
+  timeRangeContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginVertical: 15,
   },
-  favoriteText: {
+  timeRangeButton: {
+    flex: 1,
+    paddingVertical: 8,
+    marginHorizontal: 4,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  timeRangeButtonActive: {
+    backgroundColor: '#4A90E2',
+  },
+  timeRangeText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  timeRangeTextActive: {
     color: 'white',
-    fontSize: 24,
     fontWeight: 'bold',
   },
   noPriceContainer: {
@@ -469,6 +855,46 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#888',
     textAlign: 'center',
+  },
+  quantityInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    fontSize: 16,
+    width: '100%',
+  },
+  listScrollContainer: {
+    width: '100%',
+    maxHeight: 300,
+  },
+  listItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  listName: {
+    marginLeft: 12,
+    fontSize: 16,
+    color: '#333',
+  },
+  newListText: {
+    marginLeft: 12,
+    fontSize: 16,
+    color: '#4A90E2',
+    fontWeight: '500',
+  },
+  listItemDisabled: {
+    opacity: 0.5,
+  },
+  listLoader: {
+    marginLeft: 12,
+  },
+  spacer: {
+    height: 50, // Add space at the bottom of the ScrollView content
   },
 });
 

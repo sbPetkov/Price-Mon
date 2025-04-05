@@ -34,12 +34,30 @@ interface HomeScreenProps {
   navigation: HomeScreenNavigationProp;
 }
 
+interface ProductPrice {
+  price: number;
+  date_observed: string;
+}
+
+interface Product {
+  name: string;
+  brand: string;
+  barcode: string;
+  product_prices: ProductPrice[];
+}
+
+interface Favorite {
+  product_id: string;
+  products: Product;
+  latestPrice?: number;
+}
+
 const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
-  const { user } = useAuth();
-  const [favorites, setFavorites] = useState([]);
+  const { user, profile } = useAuth();
+  const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [suggestions, setSuggestions] = useState([]);
+  const [suggestions, setSuggestions] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
@@ -48,9 +66,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const [loadingLists, setLoadingLists] = useState(false);
   const [addingToList, setAddingToList] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchError, setSearchError] = useState('');
 
   useEffect(() => {
     const fetchFavorites = async () => {
+      if (!user) return;
+      
       try {
         // Query the user_favorites table and join the related products,
         // then nest product_prices within products.
@@ -73,7 +94,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         if (error) throw error;
 
         // Map through the data to determine the latest price from the nested product_prices array.
-        const favoritesWithPrice = data.map(favorite => {
+        const favoritesWithPrice = data.map((favorite: any) => {
           let latestPrice = null;
           if (
             favorite.products &&
@@ -82,7 +103,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           ) {
             // Sort the prices in descending order based on date_observed (most recent first)
             favorite.products.product_prices.sort(
-              (a, b) => new Date(b.date_observed) - new Date(a.date_observed)
+              (a: ProductPrice, b: ProductPrice) => 
+                new Date(b.date_observed).getTime() - new Date(a.date_observed).getTime()
             );
             latestPrice = favorite.products.product_prices[0].price;
           }
@@ -99,7 +121,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     };
 
     fetchFavorites();
-  }, [user.id]);
+  }, [user?.id]);
 
   // Debounced search function
   const searchProducts = debounce(async (query) => {
@@ -131,6 +153,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
   // Handle full search
   const handleFullSearch = async () => {
+    if (searchQuery.length < 3) {
+      setSearchError('Please enter at least 3 characters to search');
+      return;
+    }
+    
+    setSearchError('');
     try {
       const { data, error } = await supabase
         .from('products')
@@ -239,7 +267,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     }
   };
 
-  const renderItem = ({ item }) => (
+  const renderItem = ({ item }: { item: Favorite }) => (
     <TouchableOpacity 
       style={styles.productCard}
       onPress={() => navigation.navigate('ProductDetails', { productId: item.product_id })}
@@ -267,6 +295,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   );
 
   const onRefresh = React.useCallback(async () => {
+    if (!user) return;
+    
     setRefreshing(true);
     try {
       const { data, error } = await supabase
@@ -287,7 +317,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
       if (error) throw error;
 
-      const favoritesWithPrice = data.map(favorite => {
+      const favoritesWithPrice = data.map((favorite: any) => {
         let latestPrice = null;
         if (
           favorite.products &&
@@ -295,7 +325,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           favorite.products.product_prices.length > 0
         ) {
           favorite.products.product_prices.sort(
-            (a, b) => new Date(b.date_observed) - new Date(a.date_observed)
+            (a: ProductPrice, b: ProductPrice) => 
+              new Date(b.date_observed).getTime() - new Date(a.date_observed).getTime()
           );
           latestPrice = favorite.products.product_prices[0].price;
         }
@@ -309,7 +340,14 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     } finally {
       setRefreshing(false);
     }
-  }, [user.id]);
+  }, [user?.id]);
+
+  const getGreeting = () => {
+    if (profile && profile.first_name) {
+      return `Hello, ${profile.first_name}`;
+    }
+    return 'Hello';
+  };
 
   if (loading) {
     return (
@@ -323,10 +361,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Text style={styles.greeting}>
-            Hello, {user?.email?.split('@')[0] || 'User'}
-          </Text>
-          <Text style={styles.subtitle}>Your favorite products</Text>
+          <Text style={styles.greeting}>{getGreeting()}</Text>
         </View>
         <TouchableOpacity 
           style={styles.profileButton}
@@ -337,13 +372,33 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       </View>
       
       <View style={styles.searchContainer}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search products..."
-          value={searchQuery}
-          onChangeText={handleSearchChange}
-          onSubmitEditing={handleFullSearch}
-        />
+        <View style={styles.searchInputContainer}>
+          <Ionicons name="search-outline" size={20} color="#666" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search products..."
+            value={searchQuery}
+            onChangeText={(text) => {
+              handleSearchChange(text);
+              setSearchError('');
+            }}
+            onSubmitEditing={handleFullSearch}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity
+              onPress={() => {
+                setSearchQuery('');
+                setSuggestions([]);
+                setShowSuggestions(false);
+                setSearchError('');
+              }}
+              style={styles.clearButton}
+            >
+              <Ionicons name="close-circle" size={20} color="#999" />
+            </TouchableOpacity>
+          )}
+        </View>
+        {searchError ? <Text style={styles.errorText}>{searchError}</Text> : null}
       </View>
 
       {showSuggestions && suggestions.length > 0 && (
@@ -371,13 +426,17 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         </View>
       )}
       
+      <View style={styles.favoritesHeaderContainer}>
+        <Text style={styles.favoritesHeaderText}>Your Favorite Products</Text>
+      </View>
+      
       <FlatList
         data={favorites}
         renderItem={renderItem}
         keyExtractor={item => item.product_id}
         contentContainerStyle={[
           styles.listContainer,
-          { paddingTop: showSuggestions && suggestions.length > 0 ? 60 : 15 }
+          { paddingTop: 0 }
         ]}
         refreshControl={
           <RefreshControl
@@ -388,8 +447,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         }
         ListEmptyComponent={
           <View style={styles.emptyState}>
+            <Ionicons name="heart-outline" size={48} color="#ccc" style={styles.emptyStateIcon} />
             <Text style={styles.emptyStateText}>No favorites yet</Text>
-            <Text>Products you favorite will appear here</Text>
+            <Text style={styles.emptyStateSubText}>Products you favorite will appear here</Text>
           </View>
         }
       />
@@ -470,55 +530,89 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
   },
   headerLeft: {
     flex: 1,
   },
   greeting: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: 'bold',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    marginTop: 5,
+    color: '#333',
   },
   searchContainer: {
     padding: 16,
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
-  searchInput: {
-    height: 40,
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 46,
     borderWidth: 1,
     borderColor: '#ddd',
-    borderRadius: 20,
+    borderRadius: 23,
     paddingHorizontal: 16,
-    fontSize: 16,
     backgroundColor: '#f5f5f5',
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333',
+    height: '100%',
+  },
+  clearButton: {
+    padding: 5,
+  },
+  errorText: {
+    color: '#FF3B30',
+    fontSize: 14,
+    marginTop: 5,
+    marginLeft: 5,
+  },
+  favoritesHeaderContainer: {
+    paddingVertical: 15,
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  favoritesHeaderText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
   },
   suggestionsContainer: {
     position: 'absolute',
-    top: 72,
-    left: 0,
-    right: 0,
+    top: 134, // Adjusted for the new UI
+    left: 16,
+    right: 16,
     backgroundColor: '#fff',
-    borderRadius: 8,
+    borderRadius: 12,
     elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     zIndex: 1000,
+    maxHeight: 300,
+    borderWidth: 1,
+    borderColor: '#eee',
   },
   suggestionItem: {
-    padding: 12,
+    padding: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
   suggestionName: {
     fontSize: 16,
     color: '#333',
+    fontWeight: '500',
   },
   suggestionBrand: {
     fontSize: 14,
@@ -531,8 +625,8 @@ const styles = StyleSheet.create({
   productCard: {
     flexDirection: 'row',
     backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 15,
+    borderRadius: 12,
+    padding: 16,
     marginBottom: 15,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -547,6 +641,7 @@ const styles = StyleSheet.create({
   productName: {
     fontSize: 18,
     fontWeight: 'bold',
+    color: '#333',
   },
   productBrand: {
     fontSize: 14,
@@ -561,12 +656,22 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 30,
+    padding: 40,
+    marginTop: 20,
+  },
+  emptyStateIcon: {
+    marginBottom: 10,
   },
   emptyStateText: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 10,
+    marginBottom: 8,
+    color: '#444',
+  },
+  emptyStateSubText: {
+    fontSize: 14,
+    color: '#777',
+    textAlign: 'center',
   },
   loadingContainer: {
     flex: 1,
@@ -579,7 +684,9 @@ const styles = StyleSheet.create({
   addToListButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 8,
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     borderTopWidth: 1,
     borderTopColor: '#eee',
     marginTop: 8,
