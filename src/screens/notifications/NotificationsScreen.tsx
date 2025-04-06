@@ -20,7 +20,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../config/supabase';
-import { updateUnreadNotificationCount } from '../../navigation/BottomTabNavigator';
 import { shareNotification, formatPriceAlertForSharing } from '../../utils/shareUtils';
 
 interface Notification {
@@ -97,6 +96,29 @@ export async function markNotificationAsRead(notificationId: string) {
     return false;
   }
 }
+
+// Function to update unread notification count directly (without importing from BottomTabNavigator)
+const updateLocalUnreadStatus = async (userId: string) => {
+  if (!userId) return;
+  
+  try {
+    const { count, error } = await supabase
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('seen', false);
+    
+    if (error) throw error;
+    
+    // Access NotificationIndicatorManager through the window object in a type-safe way
+    const windowAny = window as any;
+    if (windowAny.NotificationIndicatorManager) {
+      windowAny.NotificationIndicatorManager.setHasUnread(count ? count > 0 : false);
+    }
+  } catch (error) {
+    console.error('Error updating unread notification status:', error);
+  }
+};
 
 const NotificationsScreen = () => {
   const navigation = useNavigation<any>();
@@ -198,11 +220,11 @@ const NotificationsScreen = () => {
           )
         );
         
-        // Update global notification count
-        updateUnreadNotificationCount(user.id);
+        // Update the notification count
+        updateLocalUnreadStatus(user.id);
       }
     } catch (error) {
-      console.error('Error in markNotificationsAsSeen:', error);
+      console.error('Error marking notifications as seen:', error);
     }
   };
 
@@ -318,7 +340,7 @@ const NotificationsScreen = () => {
           prev.map(n => n.id === notification.id ? { ...n, read: true } : n)
         );
         
-        // Also mark as seen if it wasn't already
+        // If notification wasn't seen, mark it as seen
         if (!notification.seen) {
           markNotificationsAsSeen([notification.id]);
         }
@@ -348,9 +370,9 @@ const NotificationsScreen = () => {
       // Update local state
       setNotifications(prev => prev.filter(n => n.id !== notificationId));
       
-      // Update global notification count
+      // After successful deletion, update the unread count
       if (user) {
-        updateUnreadNotificationCount(user.id);
+        updateLocalUnreadStatus(user.id);
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to delete notification');
@@ -380,8 +402,10 @@ const NotificationsScreen = () => {
               
               setNotifications([]);
               
-              // Update global notification count to zero
-              updateUnreadNotificationCount(user.id);
+              // After clearing all notifications, set unread count to 0
+              if (user) {
+                updateLocalUnreadStatus(user.id);
+              }
             } catch (error) {
               Alert.alert('Error', 'Failed to clear notifications');
             } finally {

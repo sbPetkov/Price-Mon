@@ -5,13 +5,35 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import { subscribeToNotifications } from './src/screens/notifications/NotificationsScreen';
-import { updateUnreadNotificationCount } from './src/navigation/BottomTabNavigator';
 import { supabase } from './src/config/supabase';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AppState, AppStateStatus } from 'react-native';
 
 // Create a client for React Query
 const queryClient = new QueryClient();
+
+// Function to check for unread notifications
+const updateNotificationStatus = async (userId: string) => {
+  if (!userId) return;
+  
+  try {
+    const { count, error } = await supabase
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('seen', false);
+    
+    if (error) throw error;
+    
+    // Access through window object
+    const windowAny = window as any;
+    if (windowAny.NotificationIndicatorManager) {
+      windowAny.NotificationIndicatorManager.setHasUnread(count ? count > 0 : false);
+    }
+  } catch (error) {
+    console.error('Error checking unread notifications:', error);
+  }
+};
 
 // Create a wrapper component to access auth context
 function AppContent() {
@@ -33,23 +55,23 @@ function AppContent() {
         (newNotification) => {
           if (isMounted.current) {
             console.log('New notification from subscription:', newNotification);
-            // Update notification badge count when a new notification arrives
-            updateUnreadNotificationCount(user.id);
+            // Update notification indicator when a new notification arrives
+            updateNotificationStatus(user.id);
           }
         }
       );
       
       setSubscription(notificationSubscription);
       
-      // Initial notification count update
-      updateUnreadNotificationCount(user.id);
+      // Initial notification status update
+      updateNotificationStatus(user.id);
       
       // Handle app state changes
       const handleAppStateChange = (nextAppState: AppStateStatus) => {
         if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-          // App has come to the foreground, update notification count
-          console.log('App returning to foreground, updating notification count');
-          updateUnreadNotificationCount(user.id);
+          // App has come to the foreground, update notification status
+          console.log('App returning to foreground, updating notification status');
+          updateNotificationStatus(user.id);
         }
         appState.current = nextAppState;
       };

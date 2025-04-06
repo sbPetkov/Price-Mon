@@ -2,6 +2,7 @@ import React, { createContext, useState, useEffect, useContext } from 'react';
 import { supabase } from '../config/supabase';
 import { Session, User } from '@supabase/supabase-js';
 import * as SecureStore from 'expo-secure-store';
+import { AppState, AppStateStatus } from 'react-native';
 
 interface AuthContextType {
   user: User | null;
@@ -23,29 +24,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<any | null>(null);
+  const appState = React.useRef(AppState.currentState);
+
+  // Function to safely check session
+  const checkSession = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      setSession(session);
+      setUser(session?.user ?? null);
+      
+      if (session?.user) {
+        await fetchUserProfile(session.user.id);
+      }
+    } catch (error) {
+      console.error('Error checking session:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    // Check for existing session
-    const checkSession = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        if (session?.user) {
-          await fetchUserProfile(session.user.id);
-        }
-      } catch (error) {
-        console.error('Error checking session:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
+    // Initial session check
     checkSession();
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
       
@@ -56,8 +59,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
+    // Handle app state changes
+    const appStateSubscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+        // App has come to foreground, check session
+        checkSession();
+      }
+      appState.current = nextAppState;
+    });
+
     return () => {
-      subscription.unsubscribe();
+      authSubscription.unsubscribe();
+      appStateSubscription.remove();
     };
   }, []);
 
@@ -108,11 +121,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         },
       });
 
-      // If signup is successful, also create a user profile
-      if (!error) {
-        // This will be handled by a database trigger in Supabase
-      }
-
       return { error };
     } catch (error) {
       return { error };
@@ -120,8 +128,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    await SecureStore.deleteItemAsync('supabase.auth.token');
+    try {
+      await supabase.auth.signOut();
+      await SecureStore.deleteItemAsync('supabase.auth.token');
+    } catch (error) {
+      console.error('Error during sign out:', error);
+    }
   };
 
   const resetPassword = async (email: string) => {
@@ -134,43 +146,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const updateUser = async (userData: Partial<User> | any) => {
+    if (!user) return;
+    
     try {
-      // Extract profile fields
-      const { first_name, last_name, city, phone_number, ...authUserData } = userData;
+      const { error } = await supabase
+        .from('profiles')
+        .update(userData)
+        .eq('user_id', user.id);
       
-      // If there are auth user data fields to update
-      if (Object.keys(authUserData).length > 0) {
-        const { error } = await supabase.auth.updateUser(authUserData);
-        if (error) throw error;
-      }
+      if (error) throw error;
       
-      // Update profile in the profiles table
-      if (first_name || last_name || city || phone_number) {
-        const { error } = await supabase
-          .from('profiles')
-          .update({
-            first_name,
-            last_name,
-            city,
-            phone_number
-          })
-          .eq('user_id', user?.id);
-          
-        if (error) throw error;
-      }
-      
-      // Update local state with new user data
-      setUser((prevUser) => ({ 
-        ...prevUser, 
-        ...authUserData,
-        user_metadata: {
-          ...prevUser?.user_metadata,
-          first_name,
-          last_name,
-          city,
-          phone_number
-        }
-      }));
+      await fetchProfile();
     } catch (error) {
       console.error('Error updating user:', error);
       throw error;

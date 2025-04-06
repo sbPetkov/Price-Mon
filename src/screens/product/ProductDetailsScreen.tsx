@@ -537,7 +537,7 @@ const ProductDetailsScreen = () => {
               }}
             >
               <Ionicons name="cart-outline" size={26} color="#4A90E2" />
-              <Text style={styles.actionButtonText}>Add to List</Text>
+              <Text style={styles.actionButtonText}>Add</Text>
             </TouchableOpacity>
           </View>
 

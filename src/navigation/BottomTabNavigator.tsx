@@ -27,12 +27,58 @@ import EditPriceScreen from '../screens/product/EditPriceScreen';
 import PriceAlertScreen from '../screens/product/PriceAlertScreen';
 import NotificationsScreen from '../screens/notifications/NotificationsScreen';
 import PriceAlertsScreen from '../screens/notifications/PriceAlertsScreen';
+import ScanToJoinScreen from '../screens/cart/ScanToJoinScreen';
 
 const Tab = createBottomTabNavigator();
 const HomeStack = createNativeStackNavigator();
 const ScannerStack = createNativeStackNavigator();
 const CartStack = createNativeStackNavigator();
 const NotificationsStack = createNativeStackNavigator();
+
+// Create a simple notification indicator manager - only track if there are unread notifications
+const NotificationIndicatorManager = {
+  hasUnread: false,
+  listeners: new Set<(hasUnread: boolean) => void>(),
+  
+  setHasUnread(hasUnread: boolean) {
+    this.hasUnread = hasUnread;
+    this.notifyListeners();
+  },
+  
+  addListener(listener: (hasUnread: boolean) => void) {
+    this.listeners.add(listener);
+    // Immediately notify the new listener with the current status
+    listener(this.hasUnread);
+    return () => this.listeners.delete(listener);
+  },
+  
+  notifyListeners() {
+    this.listeners.forEach(listener => listener(this.hasUnread));
+  }
+};
+
+// Make NotificationIndicatorManager globally available
+(window as any).NotificationIndicatorManager = NotificationIndicatorManager;
+
+// Function to check for unread notifications and update the indicator
+const updateUnreadNotificationStatus = async (userId: string) => {
+  if (!userId) return;
+  
+  try {
+    const { count, error } = await supabase
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('seen', false);
+    
+    if (error) throw error;
+    
+    // We only need to know if there are any unread notifications, not how many
+    NotificationIndicatorManager.setHasUnread(count ? count > 0 : false);
+  } catch (error) {
+    console.error('Error checking unread notifications:', error);
+  }
+};
 
 // Home stack
 const HomeStackNavigator = () => {
@@ -72,7 +118,6 @@ const ScannerStackNavigator = () => {
       <ScannerStack.Screen 
         name="ScannerScreen" 
         component={ScannerScreen} 
-        options={{ headerShown: false }}
       />
       <ScannerStack.Screen 
         name="AddProduct" 
@@ -130,6 +175,11 @@ const CartStackNavigator = () => {
         options={{ title: 'List Settings' }}
       />
       <CartStack.Screen 
+        name="ScanToJoin" 
+        component={ScanToJoinScreen}
+        options={{ headerShown: false }}
+      />
+      <CartStack.Screen 
         name="PriceAlert" 
         component={PriceAlertScreen}
         options={{ title: 'Set Price Alert' }}
@@ -153,55 +203,13 @@ const NotificationsStackNavigator = () => {
   );
 };
 
-// Create a global notification count manager to ensure all components can access the latest count
-export const NotificationCountManager = {
-  count: 0,
-  listeners: new Set<(count: number) => void>(),
-  
-  setCount(newCount: number) {
-    this.count = newCount;
-    this.notifyListeners();
-  },
-  
-  addListener(listener: (count: number) => void) {
-    this.listeners.add(listener);
-    // Immediately notify the new listener with the current count
-    listener(this.count);
-    return () => this.listeners.delete(listener);
-  },
-  
-  notifyListeners() {
-    this.listeners.forEach(listener => listener(this.count));
-  }
-};
-
-// Function to update the global notification count
-export const updateUnreadNotificationCount = async (userId: string) => {
-  if (!userId) return;
-  
-  try {
-    const { count, error } = await supabase
-      .from('notifications')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .eq('seen', false);
-    
-    if (error) throw error;
-    
-    NotificationCountManager.setCount(count || 0);
-    console.log('Updated global unread count:', count);
-  } catch (error) {
-    console.error('Error fetching unread notifications count:', error);
-  }
-};
-
 // Function to get the tab icon with badge
 const getTabIcon = (
   route: RouteProp<ParamListBase, string>, 
   focused: boolean, 
   color: string, 
   size: number, 
-  unreadCount = 0
+  hasUnread = false
 ) => {
   let iconName: keyof typeof Ionicons.glyphMap;
 
@@ -215,13 +223,11 @@ const getTabIcon = (
     iconName = focused ? 'notifications' : 'notifications-outline';
     
     // Return the icon with a badge if there are unread notifications
-    if (unreadCount > 0) {
+    if (hasUnread) {
       return (
         <View style={{ width: 24, height: 24, margin: 5 }}>
           <Ionicons name={iconName} size={size} color={color} />
-          <View style={styles.badge}>
-            {/* Show red dot instead of number */}
-          </View>
+          <View style={styles.badge} />
         </View>
       );
     }
@@ -234,19 +240,19 @@ const getTabIcon = (
 
 const BottomTabNavigator = () => {
   const { user } = useAuth();
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
   const appState = useRef(AppState.currentState);
   const refreshInterval = useRef<NodeJS.Timeout | null>(null);
   const isMounted = useRef(true);
   
-  // Setup to listen for notification count changes
+  // Setup to listen for notification indicator changes
   useEffect(() => {
     isMounted.current = true;
     
-    // Listen for changes to the global notification count
-    const removeListener = NotificationCountManager.addListener((count) => {
+    // Listen for changes to the unread notification status
+    const removeListener = NotificationIndicatorManager.addListener((hasUnread) => {
       if (isMounted.current) {
-        setUnreadCount(count);
+        setHasUnreadNotifications(hasUnread);
       }
     });
     
@@ -260,8 +266,8 @@ const BottomTabNavigator = () => {
   useEffect(() => {
     if (!user) return;
     
-    // Initial fetch
-    updateUnreadNotificationCount(user.id);
+    // Initial check
+    updateUnreadNotificationStatus(user.id);
     
     // Setup auto refresh every minute
     const setupRefreshInterval = () => {
@@ -270,8 +276,7 @@ const BottomTabNavigator = () => {
       }
       refreshInterval.current = setInterval(() => {
         if (isMounted.current && appState.current === 'active') {
-          console.log('Auto-refreshing notification count');
-          updateUnreadNotificationCount(user.id);
+          updateUnreadNotificationStatus(user.id);
         }
       }, 60000); // Refresh every minute
     };
@@ -281,8 +286,7 @@ const BottomTabNavigator = () => {
     // Handle app state changes
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-        console.log('App has come to the foreground, refreshing notification count');
-        updateUnreadNotificationCount(user.id);
+        updateUnreadNotificationStatus(user.id);
         setupRefreshInterval();
       } else if (nextAppState.match(/inactive|background/)) {
         if (refreshInterval.current) {
@@ -308,8 +312,7 @@ const BottomTabNavigator = () => {
         },
         () => {
           if (isMounted.current && appState.current === 'active') {
-            console.log('Notification change detected, updating badge count');
-            updateUnreadNotificationCount(user.id);
+            updateUnreadNotificationStatus(user.id);
           }
         }
       )
@@ -332,7 +335,7 @@ const BottomTabNavigator = () => {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         tabBarIcon: ({ focused, color, size }) => 
-          getTabIcon(route, focused, color, size, route.name === 'Notifications' ? unreadCount : 0),
+          getTabIcon(route, focused, color, size, route.name === 'Notifications' ? hasUnreadNotifications : false),
         headerShown: false,
       })}
     >
@@ -357,13 +360,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 2,
     borderColor: '#fff',
-  },
-  badgeText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: 'bold',
-    paddingHorizontal: 4,
-  },
+  }
 });
 
 export default BottomTabNavigator;
