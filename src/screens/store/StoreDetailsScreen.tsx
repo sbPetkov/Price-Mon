@@ -18,6 +18,15 @@ import { supabase } from '../../config/supabase';
 // Use dynamic import to handle potential missing native module
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import Constants from 'expo-constants';
+
+// Get Google Maps API key from env vars
+const getGoogleMapsApiKey = (): string | undefined => {
+  if (Constants.expoConfig?.extra && Constants.expoConfig.extra.GOOGLE_MAPS_API_KEY) {
+    return Constants.expoConfig.extra.GOOGLE_MAPS_API_KEY;
+  }
+  return undefined;
+};
 
 // Create a flag to track if map module is available
 let MapView: any;
