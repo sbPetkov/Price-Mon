@@ -134,7 +134,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       const { data, error } = await supabase
         .from('products')
         .select('*')
-        .or(`name.ilike.%${query}%,brand.ilike.%${query}%`)
+        .or(`name.ilike.%${query}%,brand.ilike.%${query}%,description.ilike.%${query}%`)
         .limit(5);
 
       if (error) throw error;
@@ -163,7 +163,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       const { data, error } = await supabase
         .from('products')
         .select('*')
-        .or(`name.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%`)
+        .or(`name.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%`)
         .limit(50);
 
       if (error) throw error;

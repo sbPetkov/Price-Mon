@@ -28,6 +28,7 @@ import PriceAlertScreen from '../screens/product/PriceAlertScreen';
 import NotificationsScreen from '../screens/notifications/NotificationsScreen';
 import PriceAlertsScreen from '../screens/notifications/PriceAlertsScreen';
 import ScanToJoinScreen from '../screens/cart/ScanToJoinScreen';
+import StoreDetailsScreen from '../screens/store/StoreDetailsScreen';
 
 const Tab = createBottomTabNavigator();
 const HomeStack = createNativeStackNavigator();
@@ -99,6 +100,7 @@ const HomeStackNavigator = () => {
       <HomeStack.Screen name="ProfileSettings" component={ProfileSettingsScreen} options={{ title: 'Profile Settings' }} />
       <HomeStack.Screen name="EditPrice" component={EditPriceScreen} options={{ title: 'Edit Price' }} />
       <HomeStack.Screen name="PriceAlert" component={PriceAlertScreen} options={{ title: 'Set Price Alert' }} />
+      <HomeStack.Screen name="StoreDetails" component={StoreDetailsScreen} />
     </HomeStack.Navigator>
   );
 };
@@ -147,6 +149,10 @@ const ScannerStackNavigator = () => {
         component={PriceAlertScreen} 
         options={{ title: 'Set Price Alert' }} 
       />
+      <ScannerStack.Screen 
+        name="StoreDetails" 
+        component={StoreDetailsScreen} 
+      />
     </ScannerStack.Navigator>
   );
 };
@@ -184,6 +190,10 @@ const CartStackNavigator = () => {
         component={PriceAlertScreen}
         options={{ title: 'Set Price Alert' }}
       />
+      <CartStack.Screen 
+        name="StoreDetails" 
+        component={StoreDetailsScreen} 
+      />
     </CartStack.Navigator>
   );
 };
@@ -199,6 +209,7 @@ const NotificationsStackNavigator = () => {
       <NotificationsStack.Screen name="NotificationsScreen" component={NotificationsScreen} options={{ title: 'Notifications' }} />
       <NotificationsStack.Screen name="ProductDetails" component={ProductDetailsScreen} options={{ title: 'Product Details' }} />
       <NotificationsStack.Screen name="PriceAlerts" component={PriceAlertsScreen} options={{ title: 'Price Alerts' }} />
+      <NotificationsStack.Screen name="StoreDetails" component={StoreDetailsScreen} />
     </NotificationsStack.Navigator>
   );
 };

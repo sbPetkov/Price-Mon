@@ -17,31 +17,89 @@ import {
   Keyboard,
 } from 'react-native';
 import { useRoute, useNavigation, useFocusEffect } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RouteProp } from '@react-navigation/native';
 import { supabase } from '../../config/supabase';
 import { LineChart } from 'react-native-chart-kit';
 import { useAuth } from '../../context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 
+// Define route param types
+type ProductDetailsParams = {
+  productId: string;
+  barcode?: string;
+  refresh?: boolean;
+};
+
+// Define navigation types
+type ProductStackParamList = {
+  ProductDetails: ProductDetailsParams;
+  AddPrice: { productId: string; barcode?: string };
+  PriceAlert: { productId: string; productName: string; userCity: string };
+  Cart: { screen: string };
+  StoreDetails: { storeId: string; storeName: string };
+};
+
+type ProductDetailsNavigationProp = NativeStackNavigationProp<ProductStackParamList>;
+
+// Define data interfaces
+interface PriceEntry {
+  price: number;
+  date_observed: string;
+  is_on_sale?: boolean;
+  regular_price?: number | null;
+  stores?: {
+    id: string;
+    name: string;
+    city: string;
+  };
+}
+
+interface Product {
+  id: string;
+  name: string;
+  brand: string;
+  description: string;
+  product_prices: PriceEntry[];
+}
+
+interface Store {
+  id: string;
+  name: string;
+  city: string;
+  average: number;
+}
+
+interface SelectedDataPoint extends PriceEntry {
+  value?: number;
+  date: string;
+}
+
+interface ShoppingList {
+  id: string;
+  name: string;
+}
+
 const ProductDetailsScreen = () => {
-  const route = useRoute();
-  const navigation = useNavigation();
+  const route = useRoute<RouteProp<{ params: ProductDetailsParams }, 'params'>>();
+  const navigation = useNavigation<ProductDetailsNavigationProp>();
   const { productId, barcode, refresh } = route.params;
   const { user, profile } = useAuth();
-  const [product, setProduct] = useState(null);
+  const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
-  const [allPriceHistory, setAllPriceHistory] = useState([]);
-  const [priceHistory, setPriceHistory] = useState([]);
+  const [allPriceHistory, setAllPriceHistory] = useState<PriceEntry[]>([]);
+  const [priceHistory, setPriceHistory] = useState<PriceEntry[]>([]);
   const [timeRange, setTimeRange] = useState('1month'); // '1month', '6months', 'all'
-  const [cheapestStores, setCheapestStores] = useState([]);
+  const [cheapestStores, setCheapestStores] = useState<Store[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
-  const [selectedDataPoint, setSelectedDataPoint] = useState(null);
+  const [selectedDataPoint, setSelectedDataPoint] = useState<SelectedDataPoint | null>(null);
   const [isFavorite, setIsFavorite] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const screenWidth = Dimensions.get('window').width;
 
   // Add shopping list related state
   const [listModalVisible, setListModalVisible] = useState(false);
-  const [availableLists, setAvailableLists] = useState([]);
+  const [availableLists, setAvailableLists] = useState<ShoppingList[]>([]);
   const [loadingLists, setLoadingLists] = useState(false);
   const [addingToList, setAddingToList] = useState(false);
   const [quantity, setQuantity] = useState('1');
@@ -60,6 +118,7 @@ const ProductDetailsScreen = () => {
             is_on_sale,
             regular_price,
             stores (
+              id,
               name,
               city
             )
@@ -70,6 +129,8 @@ const ProductDetailsScreen = () => {
 
       if (productError) throw productError;
 
+      if (!user) throw new Error('User not found');
+
       const { data: favoriteData, error: favoriteError } = await supabase
         .from('user_favorites')
         .select('*')
@@ -79,8 +140,8 @@ const ProductDetailsScreen = () => {
       if (favoriteError) throw favoriteError;
 
       // Sort price history by date, oldest to newest
-      const sortedPrices = productData.product_prices.sort((a, b) => 
-        new Date(a.date_observed) - new Date(b.date_observed)
+      const sortedPrices = productData.product_prices.sort((a: PriceEntry, b: PriceEntry) => 
+        new Date(a.date_observed).getTime() - new Date(b.date_observed).getTime()
       );
 
       setAllPriceHistory(sortedPrices);
@@ -97,24 +158,24 @@ const ProductDetailsScreen = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [productId, user.id]);
+  }, [productId, user?.id]);
 
-  const filterPriceHistoryByTimeRange = (prices, range) => {
-    let filteredPrices = [];
+  const filterPriceHistoryByTimeRange = (prices: PriceEntry[], range: string) => {
+    let filteredPrices: PriceEntry[] = [];
     const now = new Date();
     
     switch (range) {
       case '1month':
         const oneMonthAgo = new Date(now);
         oneMonthAgo.setMonth(now.getMonth() - 1);
-        filteredPrices = prices.filter(price => 
+        filteredPrices = prices.filter((price: PriceEntry) => 
           new Date(price.date_observed) >= oneMonthAgo
         );
         break;
       case '6months':
         const sixMonthsAgo = new Date(now);
         sixMonthsAgo.setMonth(now.getMonth() - 6);
-        filteredPrices = prices.filter(price => 
+        filteredPrices = prices.filter((price: PriceEntry) => 
           new Date(price.date_observed) >= sixMonthsAgo
         );
         break;
@@ -137,18 +198,18 @@ const ProductDetailsScreen = () => {
     if (refresh) {
       fetchData();
     }
-  }, [refresh]);
+  }, [refresh, fetchData]);
 
   useEffect(() => {
     if (allPriceHistory.length > 0) {
       filterPriceHistoryByTimeRange(allPriceHistory, timeRange);
     }
-  }, [timeRange]);
+  }, [timeRange, allPriceHistory]);
 
   useFocusEffect(
     React.useCallback(() => {
       fetchData();
-    }, [productId])
+    }, [productId, fetchData])
   );
 
   const onRefresh = useCallback(() => {
@@ -157,6 +218,8 @@ const ProductDetailsScreen = () => {
   }, [fetchData]);
 
   const toggleFavorite = async () => {
+    if (!user) return;
+    
     try {
       if (isFavorite) {
         const { error } = await supabase
@@ -186,6 +249,8 @@ const ProductDetailsScreen = () => {
   };
 
   const fetchLists = async () => {
+    if (!user) return;
+    
     setLoadingLists(true);
     try {
       const { data, error } = await supabase
@@ -209,7 +274,7 @@ const ProductDetailsScreen = () => {
     }
   };
 
-  const handleAddToList = async (listId) => {
+  const handleAddToList = async (listId: string) => {
     if (!productId || !user) return;
     
     setAddingToList(true);
@@ -276,17 +341,18 @@ const ProductDetailsScreen = () => {
     }
   };
 
-  const findCheapestStores = (prices) => {
-    const storeMap = {};
+  const findCheapestStores = (prices: PriceEntry[]) => {
+    const storeMap: Record<string, { prices: number[], city: string, count: number, id: string }> = {};
 
-    prices.forEach(entry => {
+    prices.forEach((entry: PriceEntry) => {
       const store = entry.stores;
       if (store) {
         if (!storeMap[store.name]) {
           storeMap[store.name] = {
             prices: [entry.price],
             city: store.city,
-            count: 1
+            count: 1,
+            id: store.id
           };
         } else {
           storeMap[store.name].prices.push(entry.price);
@@ -298,7 +364,8 @@ const ProductDetailsScreen = () => {
     const storesArray = Object.entries(storeMap).map(([name, data]) => ({
       name,
       city: data.city,
-      average: data.prices.reduce((a, b) => a + b, 0) / data.prices.length
+      average: data.prices.reduce((a: number, b: number) => a + b, 0) / data.prices.length,
+      id: data.id
     }));
 
     setCheapestStores(storesArray.sort((a, b) => a.average - b.average));
@@ -309,18 +376,36 @@ const ProductDetailsScreen = () => {
     return priceHistory.reduce((sum, entry) => sum + entry.price, 0) / priceHistory.length;
   };
 
-  const handleDataPointPress = (dataPoint) => {
+  // Format date for the modal to dd/MMM/yyyy format
+  const formatDetailDate = (dateString: string): string => {
+    const date = new Date(dateString);
+    const day = date.getDate().toString().padStart(2, '0');
+    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    const month = months[date.getMonth()];
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
+
+  const handleDataPointPress = (dataPoint: { index: number, value: number }) => {
     const selectedEntry = priceHistory[dataPoint.index];
     setSelectedDataPoint({
       ...selectedEntry,
       value: dataPoint.value,
-      date: new Date(selectedEntry.date_observed).toLocaleDateString()
+      date: formatDetailDate(selectedEntry.date_observed)
     });
     setModalVisible(true);
   };
 
+  // Navigate to store details
+  const navigateToStoreDetails = (storeId: string, storeName: string) => {
+    navigation.navigate('StoreDetails', { 
+      storeId, 
+      storeName 
+    });
+  };
+
   // Format date for x-axis labels to prevent overlapping
-  const formatChartDate = (dateString) => {
+  const formatChartDate = (dateString: string): string => {
     const date = new Date(dateString);
     
     // Different format based on time range to prevent overlapping
@@ -416,9 +501,16 @@ const ProductDetailsScreen = () => {
 
               <Text style={styles.subtitle}>Cheapest Stores ({getTimeRangeText()}):</Text>
               {cheapestStores.slice(0, 3).map((store, index) => (
-                <Text key={index} style={styles.storeText}>
-                  {store.name} ({store.city}): ${store.average.toFixed(2)}
-                </Text>
+                <TouchableOpacity 
+                  key={index} 
+                  style={styles.storeItem}
+                  onPress={() => navigateToStoreDetails(store.id, store.name)}
+                >
+                  <Text style={styles.storeText}>
+                    {store.name} ({store.city}): ${store.average.toFixed(2)}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color="#666" />
+                </TouchableOpacity>
               ))}
 
               <View style={styles.timeRangeContainer}>
@@ -563,14 +655,25 @@ const ProductDetailsScreen = () => {
                   <Text style={styles.modalTitle}>Price Details</Text>
                   <Text style={styles.modalText}>Date: {selectedDataPoint.date}</Text>
                   <Text style={styles.modalText}>Price: ${selectedDataPoint.value?.toFixed(2) || 'N/A'}</Text>
-                  {selectedDataPoint.is_on_sale && selectedDataPoint.regular_price !== null && (
+                  {selectedDataPoint.is_on_sale && selectedDataPoint.regular_price !== null && selectedDataPoint.regular_price !== undefined && (
                     <Text style={styles.saleText}>
                       Regular Price: ${selectedDataPoint.regular_price.toFixed(2)}
                     </Text>
                   )}
-                  <Text style={styles.modalText}>
-                    Store: {selectedDataPoint.stores?.name || 'Unknown Store'}
-                  </Text>
+                  <TouchableOpacity 
+                    onPress={() => {
+                      setModalVisible(false);
+                      if (selectedDataPoint.stores?.id) {
+                        navigateToStoreDetails(selectedDataPoint.stores.id, selectedDataPoint.stores.name);
+                      }
+                    }}
+                    style={styles.storeLink}
+                  >
+                    <Text style={styles.storeLinkText}>
+                      Store: {selectedDataPoint.stores?.name || 'Unknown Store'}
+                    </Text>
+                    {selectedDataPoint.stores?.id && <Ionicons name="open-outline" size={16} color="#4A90E2" />}
+                  </TouchableOpacity>
                   <Text style={styles.modalText}>
                     Location: {selectedDataPoint.stores?.city || 'Unknown City'}
                   </Text>
@@ -895,6 +998,25 @@ const styles = StyleSheet.create({
   },
   spacer: {
     height: 50, // Add space at the bottom of the ScrollView content
+  },
+  storeItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  storeLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingVertical: 4,
+  },
+  storeLinkText: {
+    fontSize: 16,
+    color: '#4A90E2',
+    marginRight: 6,
   },
 });
 
