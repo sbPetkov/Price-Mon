@@ -35,14 +35,42 @@ const AddStoreScreen = () => {
         return;
       }
       
+      // Get precise location
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
       
-      setLatitude(location.coords.latitude);
-      setLongitude(location.coords.longitude);
+      const currentLat = location.coords.latitude;
+      const currentLon = location.coords.longitude;
       
-      Alert.alert('Success', 'Current location added. Make sure you are at the store location for accurate results.');
+      setLatitude(currentLat);
+      setLongitude(currentLon);
+      
+      // --- Reverse Geocode --- 
+      let addressString = '';
+      let cityString = '';
+      try {
+          const addresses = await Location.reverseGeocodeAsync({ latitude: currentLat, longitude: currentLon });
+          if (addresses && addresses.length > 0) {
+              const firstAddress = addresses[0];
+              // Construct address string (customize as needed)
+              addressString = `${firstAddress.streetNumber || ''} ${firstAddress.street || ''}`.trim();
+              cityString = firstAddress.city || firstAddress.subregion || ''; // Fallback to subregion if city is null
+              
+              // Update state
+              setAddress(addressString);
+              setCity(cityString);
+              
+              Alert.alert('Success', `Location added and address/city autofilled: ${addressString ? addressString + ', ' : ''}${cityString}`);
+          } else {
+              Alert.alert('Location Added', 'Current location coordinates added, but address could not be determined automatically.');
+          }
+      } catch (geocodeError) {
+          console.error('Error during reverse geocoding:', geocodeError);
+          Alert.alert('Location Added', 'Current location coordinates added, but failed to fetch address details.');
+      }
+      // --- End Reverse Geocode ---
+
     } catch (error) {
       console.error('Error getting location:', error);
       Alert.alert('Error', 'Failed to get location');

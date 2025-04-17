@@ -3,7 +3,16 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator,
 import { useAuth } from '../../context/AuthContext';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
-type LoginScreenProps = NativeStackScreenProps<any, 'Login'>;
+// Define the param list used in AuthNavigator
+type AuthStackParamList = {
+  Login: undefined;
+  Signup: undefined;
+  ForgotPassword: undefined;
+  ResetPassword: { access_token?: string };
+};
+
+// Use the param list to type the screen props
+type LoginScreenProps = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
 const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   const { signIn } = useAuth();

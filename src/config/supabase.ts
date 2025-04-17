@@ -15,13 +15,10 @@ const getEnvVar = (key: string, fallback: string): string => {
 
 // Supabase configuration
 const supabaseUrl = getEnvVar(
-  'SUPABASE_URL', 
-  'https://meolzrablwhoayjmcsjs.supabase.co'
-);
+  'SUPABASE_URL');
+  
 const supabaseKey = getEnvVar(
-  'SUPABASE_ANON_KEY', 
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1lb2x6cmFibHdob2F5am1jc2pzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzk0NDI0OTcsImV4cCI6MjA1NTAxODQ5N30.PMEjGT0Wviq3_PkQGmidnj66fDVl7jsIbPD_mTBb4AM'
-);
+  'SUPABASE_ANON_KEY');
 
 // Simple localStorage-like adapter for Supabase
 // Using only SecureStore but with error handling to prevent crashes

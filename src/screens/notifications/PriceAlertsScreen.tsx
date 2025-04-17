@@ -22,7 +22,7 @@ interface PriceAlert {
   user_id: string;
   product_id: string;
   price_limit: number;
-  city: string;
+  city: string | null;
   active: boolean;
   created_at: string;
   updated_at?: string;
@@ -41,6 +41,8 @@ const PriceAlertsScreen = () => {
   const [editAlert, setEditAlert] = useState<PriceAlert | null>(null);
   const [newPrice, setNewPrice] = useState('');
   const [newCity, setNewCity] = useState('');
+  const [editIsGlobalAlert, setEditIsGlobalAlert] = useState(false);
+  const [loadingUpdate, setLoadingUpdate] = useState(false);
 
   const loadAlerts = useCallback(async () => {
     if (!user) return;
@@ -85,7 +87,15 @@ const PriceAlertsScreen = () => {
   const openEditModal = (alert: PriceAlert) => {
     setEditAlert(alert);
     setNewPrice(alert.price_limit.toString());
-    setNewCity(alert.city);
+    
+    if (alert.city === null) {
+      setNewCity('');
+      setEditIsGlobalAlert(true);
+    } else {
+      setNewCity(alert.city);
+      setEditIsGlobalAlert(false);
+    }
+    
     setEditModal(true);
   };
 
@@ -94,24 +104,26 @@ const PriceAlertsScreen = () => {
     
     const priceValue = parseFloat(newPrice);
     if (isNaN(priceValue) || priceValue <= 0) {
-      Alert.alert('Error', 'Please enter a valid price');
+      Alert.alert('Error', 'Please enter a valid price greater than 0');
       return;
     }
 
-    if (!newCity.trim()) {
-      Alert.alert('Error', 'Please enter a city');
+    if (!editIsGlobalAlert && !newCity.trim()) {
+      Alert.alert('Error', 'Please enter a city or select "Alert for any city"');
       return;
     }
 
+    setLoadingUpdate(true);
     try {
-      setLoading(true);
+      const updateData = {
+          price_limit: priceValue,
+          city: editIsGlobalAlert ? null : newCity.trim(),
+          updated_at: new Date().toISOString(),
+      };
+      
       const { error } = await supabase
         .from('price_alerts')
-        .update({
-          price_limit: priceValue,
-          city: newCity.trim(),
-          updated_at: new Date().toISOString(),
-        })
+        .update(updateData)
         .eq('id', editAlert.id);
 
       if (error) throw error;
@@ -121,9 +133,13 @@ const PriceAlertsScreen = () => {
       loadAlerts();
     } catch (error) {
       console.error('Error updating price alert:', error);
-      Alert.alert('Error', 'Failed to update price alert');
+      if (error instanceof Error && error.message.includes('violates not-null constraint') && error.message.includes('"city"')) {
+          Alert.alert('Database Error', 'Failed to update: The database still requires a city. Please run the provided SQL command to allow NULL values in the city column.');
+      } else {
+           Alert.alert('Error', 'Failed to update price alert. Please try again.');
+      }
     } finally {
-      setLoading(false);
+      setLoadingUpdate(false);
     }
   };
 
@@ -224,7 +240,7 @@ const PriceAlertsScreen = () => {
                 </View>
                 <View style={styles.alertDetails}>
                   <Text style={styles.cityLabel}>City:</Text>
-                  <Text style={styles.cityValue}>{item.city}</Text>
+                  <Text style={styles.cityValue}>{item.city === null ? 'Any' : item.city}</Text>
                 </View>
                 <View style={styles.statusContainer}>
                   <Text style={styles.statusLabel}>Status:</Text>
@@ -301,12 +317,27 @@ const PriceAlertsScreen = () => {
                   />
                 </View>
 
-                <Text style={styles.inputLabel}>City</Text>
+                <TouchableOpacity 
+                  style={styles.checkboxContainerModal} 
+                  onPress={() => setEditIsGlobalAlert(!editIsGlobalAlert)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons 
+                    name={editIsGlobalAlert ? 'checkbox' : 'square-outline'} 
+                    size={24} 
+                    color={editIsGlobalAlert ? '#4A90E2' : '#888'} 
+                  />
+                  <Text style={styles.checkboxLabelModal}>Alert for any city</Text>
+                </TouchableOpacity>
+
+                <Text style={[styles.inputLabel, editIsGlobalAlert && styles.labelDisabled]}>City</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, editIsGlobalAlert && styles.inputDisabled]}
                   value={newCity}
                   onChangeText={setNewCity}
-                  placeholder="Enter city"
+                  placeholder={editIsGlobalAlert ? "Any city selected" : "Enter city"}
+                  editable={!editIsGlobalAlert}
+                  selectTextOnFocus={!editIsGlobalAlert}
                 />
 
                 <View style={styles.modalActions}>
@@ -318,10 +349,15 @@ const PriceAlertsScreen = () => {
                   </TouchableOpacity>
                   
                   <TouchableOpacity
-                    style={styles.saveButton}
+                    style={[styles.saveButton, loadingUpdate && styles.buttonDisabled]}
                     onPress={handleUpdateAlert}
+                    disabled={loadingUpdate}
                   >
-                    <Text style={styles.saveButtonText}>Save Changes</Text>
+                    {loadingUpdate ? (
+                        <ActivityIndicator size="small" color="#fff"/>
+                    ) : (
+                        <Text style={styles.saveButtonText}>Save Changes</Text>
+                    )}
                   </TouchableOpacity>
                 </View>
               </View>
@@ -510,6 +546,20 @@ const styles = StyleSheet.create({
     height: 50,
     fontSize: 16,
   },
+  checkboxContainerModal: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 20,
+      paddingVertical: 5,
+  },
+  checkboxLabelModal: {
+      marginLeft: 10,
+      fontSize: 16,
+      color: '#333',
+  },
+  labelDisabled: {
+      color: '#aaa',
+  },
   input: {
     borderWidth: 1,
     borderColor: '#ddd',
@@ -518,6 +568,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 20,
     backgroundColor: '#f9f9f9',
+  },
+  inputDisabled: {
+      backgroundColor: '#eee',
+      borderColor: '#e0e0e0',
+      color: '#999',
   },
   modalActions: {
     flexDirection: 'row',
@@ -541,6 +596,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#4A90E2',
     alignItems: 'center',
     width: '48%',
+  },
+  buttonDisabled: {
+      backgroundColor: '#a0c8f0',
   },
   saveButtonText: {
     color: '#fff',
