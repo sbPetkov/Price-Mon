@@ -53,6 +53,9 @@ interface PriceEntry {
     name: string;
     city: string;
   };
+  report_count?: number;
+  is_active?: boolean;
+  id?: string;
 }
 
 interface Product {
@@ -73,6 +76,7 @@ interface Store {
 interface SelectedDataPoint extends PriceEntry {
   value?: number;
   date: string;
+  hasReported?: boolean;
 }
 
 interface ShoppingList {
@@ -113,10 +117,13 @@ const ProductDetailsScreen = () => {
         .select(`
           *,
           product_prices (
+            id,
             price,
             date_observed,
             is_on_sale,
             regular_price,
+            report_count,
+            is_active,
             stores (
               id,
               name,
@@ -139,8 +146,13 @@ const ProductDetailsScreen = () => {
 
       if (favoriteError) throw favoriteError;
 
+      // Filter out inactive prices or those with high report counts (3 or more)
+      const activePrices = productData.product_prices.filter((price: PriceEntry) => 
+        price.is_active !== false && (!price.report_count || price.report_count < 3)
+      );
+
       // Sort price history by date, oldest to newest
-      const sortedPrices = productData.product_prices.sort((a: PriceEntry, b: PriceEntry) => 
+      const sortedPrices = activePrices.sort((a: PriceEntry, b: PriceEntry) => 
         new Date(a.date_observed).getTime() - new Date(b.date_observed).getTime()
       );
 
@@ -386,12 +398,34 @@ const ProductDetailsScreen = () => {
     return `${day}/${month}/${year}`;
   };
 
-  const handleDataPointPress = (dataPoint: { index: number, value: number }) => {
+  const handleDataPointPress = async (dataPoint: { index: number, value: number }) => {
     const selectedEntry = priceHistory[dataPoint.index];
+    
+    // Check if the user has already reported this price
+    let hasReported = false;
+    if (user && selectedEntry.id) {
+      try {
+        const { data, error } = await supabase
+          .from('price_reports')
+          .select('*')
+          .eq('price_id', selectedEntry.id)
+          .eq('user_id', user.id)
+          .single();
+        
+        if (data && !error) {
+          hasReported = true;
+        }
+      } catch (error) {
+        // Ignore error - we'll default to showing the Report button
+        console.log('Error checking report status:', error);
+      }
+    }
+    
     setSelectedDataPoint({
       ...selectedEntry,
       value: dataPoint.value,
-      date: formatDetailDate(selectedEntry.date_observed)
+      date: formatDetailDate(selectedEntry.date_observed),
+      hasReported
     });
     setModalVisible(true);
   };
@@ -439,6 +473,127 @@ const ProductDetailsScreen = () => {
     return priceHistory.map((entry, index) => 
       index % interval === 0 ? formatChartDate(entry.date_observed) : ''
     );
+  };
+
+  // Add function to report a price as false
+  const reportPrice = async (priceId: string | undefined) => {
+    if (!priceId || !user) {
+      Alert.alert('Error', 'Cannot report this price. Please try again later.');
+      return;
+    }
+
+    try {
+      // First get the current price record
+      const { data: priceData, error: fetchError } = await supabase
+        .from('product_prices')
+        .select('report_count')
+        .eq('id', priceId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      // Increment the report count
+      const currentCount = priceData.report_count || 0;
+      const newCount = currentCount + 1;
+      
+      // Update the record with the new count
+      const { error: updateError } = await supabase
+        .from('product_prices')
+        .update({ 
+          report_count: newCount,
+          // If report count reaches 3, mark as inactive
+          is_active: newCount < 3
+        })
+        .eq('id', priceId);
+
+      if (updateError) throw updateError;
+
+      // Track who reported this price to prevent duplicate reports
+      const { error: reportError } = await supabase
+        .from('price_reports')
+        .insert([{
+          price_id: priceId,
+          user_id: user.id,
+          reported_at: new Date().toISOString()
+        }]);
+
+      if (reportError) throw reportError;
+
+      Alert.alert(
+        'Thank you', 
+        'This price has been reported and will be reviewed by our team.',
+        [
+          { 
+            text: 'OK', 
+            onPress: () => {
+              setModalVisible(false);
+              // Refresh data to update the chart
+              fetchData();
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Error reporting price:', error);
+      Alert.alert('Error', 'Failed to report price. Please try again later.');
+    }
+  };
+
+  // Update the cancelReport function with more detailed error handling
+  const cancelReport = async (priceId: string | undefined) => {
+    if (!priceId || !user) {
+      Alert.alert('Error', 'Cannot cancel this report. Please try again later.');
+      return;
+    }
+
+    try {
+      console.log(`Attempting to delete report for price: ${priceId} by user: ${user.id}`);
+      
+      // Delete the report from the price_reports table
+      const { error, count } = await supabase
+        .from('price_reports')
+        .delete()
+        .eq('price_id', priceId)
+        .eq('user_id', user.id);
+
+      if (error) {
+        console.error('Delete operation error:', error);
+        throw error;
+      }
+
+      console.log(`Delete operation completed. Rows affected: ${count}`);
+
+      // Verify the report is gone
+      const { data: checkData, error: checkError } = await supabase
+        .from('price_reports')
+        .select('*')
+        .eq('price_id', priceId)
+        .eq('user_id', user.id);
+      
+      if (checkError) {
+        console.error('Error verifying deletion:', checkError);
+      } else {
+        console.log(`Verification complete. Reports remaining: ${checkData?.length || 0}`);
+      }
+
+      Alert.alert(
+        'Report Cancelled', 
+        'Your report has been removed.',
+        [
+          { 
+            text: 'OK', 
+            onPress: () => {
+              setModalVisible(false);
+              // Refresh data to update the chart
+              fetchData();
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Error cancelling report:', error);
+      Alert.alert('Error', 'Failed to cancel report. Please try again later.');
+    }
   };
 
   if (loading) {
@@ -677,14 +832,33 @@ const ProductDetailsScreen = () => {
                   <Text style={styles.modalText}>
                     Location: {selectedDataPoint.stores?.city || 'Unknown City'}
                   </Text>
+                  
+                  <View style={styles.modalButtonsContainer}>
+                    <TouchableOpacity
+                      style={styles.closeButton}
+                      onPress={() => setModalVisible(false)}
+                    >
+                      <Text style={styles.closeButtonText}>Close</Text>
+                    </TouchableOpacity>
+                    
+                    {selectedDataPoint?.hasReported ? (
+                      <TouchableOpacity
+                        style={[styles.reportButton, styles.cancelReportButton]}
+                        onPress={() => cancelReport(selectedDataPoint.id)}
+                      >
+                        <Text style={styles.reportButtonText}>Cancel Report</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.reportButton}
+                        onPress={() => reportPrice(selectedDataPoint?.id)}
+                      >
+                        <Text style={styles.reportButtonText}>Report Price</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </>
               )}
-              <TouchableOpacity
-                style={styles.closeButton}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.closeButtonText}>Close</Text>
-              </TouchableOpacity>
             </View>
           </View>
         </Modal>
@@ -907,11 +1081,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   closeButton: {
-    marginTop: 15,
     backgroundColor: '#4A90E2',
     paddingVertical: 10,
     paddingHorizontal: 20,
     borderRadius: 8,
+    flex: 1,
+    marginRight: 5,
+    alignItems: 'center',
   },
   closeButtonText: {
     color: 'white',
@@ -1017,6 +1193,28 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#4A90E2',
     marginRight: 6,
+  },
+  modalButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginTop: 15,
+  },
+  reportButton: {
+    backgroundColor: '#FF6B6B',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    flex: 1,
+    marginLeft: 5,
+    alignItems: 'center',
+  },
+  reportButtonText: {
+    color: 'white',
+    fontWeight: '500',
+  },
+  cancelReportButton: {
+    backgroundColor: '#FFA500', // Orange color for cancel button
   },
 });
 
